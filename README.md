@@ -3,7 +3,9 @@
 Carta digital con código QR y pedidos por WhatsApp, para negocios pequeños en Colombia.
 Gratis, sin registro, sin instalar nada.
 
-**En vivo:** https://weissailab.github.io/micarta/
+**En vivo:** https://micarta.weissailab.com/
+(la dirección vieja, `weissailab.github.io/micarta`, redirige aquí conservando el fragmento,
+así que los QR ya impresos siguen sirviendo)
 
 ## Qué hace
 
