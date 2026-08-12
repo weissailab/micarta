@@ -84,10 +84,12 @@
 
   /* ---------------- modelo ---------------- */
 
+  var MAX_MESAS = 60;
+
   function nuevaCarta() {
     return {
       n: '', t: '', w: '', e: '🍔', c: 0, a: '', h: '',
-      dom: 0, domc: 0,
+      dom: 0, domc: 0, mesas: 0,
       g: [{ n: 'Para empezar', i: [item()] }]
     };
   }
@@ -186,8 +188,14 @@
     } catch (e) { return null; }
   }
 
-  function linkPublico(state) {
-    return location.origin + location.pathname + '#/c/' + encode(state);
+  /* El número de mesa va pegado al final del link: la carta es la misma para
+     todas las mesas, solo cambia el sufijo, así que el QR casi no crece. */
+  function linkPublico(state, mesa) {
+    return location.origin + location.pathname + '#/c/' + encode(state) +
+      (mesa ? '/m/' + mesa : '');
+  }
+  function linkMesas(state) {
+    return location.origin + location.pathname + '#/mesas/' + encode(state);
   }
   function linkEdicion(state) {
     return location.origin + location.pathname + '#/e/' + encode(state);
@@ -228,10 +236,16 @@
 
   function router() {
     var h = location.hash || '';
-    var mc = h.match(/^#\/c\/(.+)$/);
+    var mc = h.match(/^#\/c\/([^\/]+)(?:\/m\/(\d+))?$/);
     if (mc) {
       var d = decode(mc[1]);
-      if (d) return vistaCarta(d);
+      if (d) return vistaCarta(d, Number(mc[2]) || 0);
+      return vistaError();
+    }
+    var mm = h.match(/^#\/mesas\/([^\/]+)$/);
+    if (mm) {
+      var carta = decode(mm[1]);
+      if (carta) return vistaMesas(carta);
       return vistaError();
     }
     var me = h.match(/^#\/e\/(.+)$/);
@@ -425,6 +439,10 @@
       '<div class="field"><label>Horario</label>' +
         '<input class="inp" data-k="h" placeholder="Lun a Sáb, 8am – 8pm" value="' + esc(S.h) + '"></div></div>' +
       '<div class="field"><label>Color</label><div class="swatches">' + sw + '</div></div>' +
+      '<div class="field"><label>Mesas en el local</label>' +
+        '<input class="inp" data-k="mesas" data-num="1" inputmode="numeric" placeholder="0" value="' + (S.mesas ? Number(S.mesas).toLocaleString('es-CO') : '') + '">' +
+        '<p class="hint">Si pones un número, te genero un QR distinto para cada mesa y el pedido ' +
+        'te llega diciendo de qué mesa es. Déjalo vacío si no atiendes en el local.</p></div>' +
       '<div class="field" style="margin-bottom:0"><label>Domicilio</label>' +
         '<label style="display:flex;gap:9px;align-items:center;font-weight:600;font-size:14.5px;margin-bottom:8px">' +
           '<input type="checkbox" data-k="dom" ' + (S.dom ? 'checked' : '') + ' style="width:18px;height:18px;accent-color:var(--acc)"> Hago domicilios</label>' +
@@ -479,7 +497,8 @@
 
   function renderPreview() {
     var p = document.getElementById('preview');
-    if (p) p.innerHTML = cartaHTML(S, true);
+    /* Si tiene mesas, la previa muestra la mesa 1 para que vea lo que ve el cliente. */
+    if (p) p.innerHTML = cartaHTML(S, true, Number(S.mesas) ? 1 : 0);
     var m = document.getElementById('medidor');
     if (m) m.innerHTML = medidorHTML(S);
   }
@@ -515,9 +534,10 @@
 
   /* ---------------- vista pública de la carta ---------------- */
 
-  function cartaHTML(st, preview) {
+  function cartaHTML(st, preview, mesa) {
     var t = tema(st);
     var meta = [];
+    if (mesa) meta.push('<span class="mesa">🍽️ Mesa ' + mesa + '</span>');
     if (st.h) meta.push('<span>🕒 ' + esc(st.h) + '</span>');
     if (st.a) meta.push('<span>📍 ' + esc(st.a) + '</span>');
     if (st.dom) meta.push('<span>🛵 Domicilio' + (Number(st.domc) ? ' ' + money(st.domc) : '') + '</span>');
@@ -564,10 +584,10 @@
     '</div>';
   }
 
-  function vistaCarta(st) {
+  function vistaCarta(st, mesa) {
     pintarTema(st);
-    document.title = (st.n || 'Carta') + (st.t ? ' — ' + st.t : '');
-    var root = mount('<div style="max-width:560px;margin:0 auto;background:#fff;min-height:100vh">' + cartaHTML(st, false) + '</div>');
+    document.title = (mesa ? 'Mesa ' + mesa + ' — ' : '') + (st.n || 'Carta') + (st.t ? ' — ' + st.t : '');
+    var root = mount('<div style="max-width:560px;margin:0 auto;background:#fff;min-height:100vh">' + cartaHTML(st, false, mesa) + '</div>');
 
     var carrito = {}; // "gi.ii" -> cantidad
 
@@ -601,7 +621,9 @@
         bar.innerHTML = '<button class="btn" data-act="ver-pedido"><span class="n">' + n + '</span> Hacer el pedido · ' + money(totalPesos()) + '</button>';
       } else {
         bar.innerHTML = waNum(st.w)
-          ? '<a class="btn ghost" href="https://wa.me/' + waNum(st.w) + '?text=' + encodeURIComponent('Hola ' + (st.n || '') + ', vi su carta 👋') + '" target="_blank" rel="noopener">💬 Escribir por WhatsApp</a>'
+          ? '<a class="btn ghost" href="https://wa.me/' + waNum(st.w) + '?text=' + encodeURIComponent(
+              mesa ? 'Hola, estoy en la mesa ' + mesa + ' de ' + (st.n || '') + ' 👋' : 'Hola ' + (st.n || '') + ', vi su carta 👋'
+            ) + '" target="_blank" rel="noopener">💬 ' + (mesa ? 'Llamar al mesero' : 'Escribir por WhatsApp') + '</a>'
           : '';
       }
     }
@@ -668,21 +690,24 @@
         return { n: it.n, q: carrito[k], p: Number(it.p) || 0, k: k };
       });
       var sub = totalPesos();
-      var dom = st.dom ? (Number(st.domc) || 0) : 0;
+      /* Sentado en la mesa no hay domicilio ni dirección que pedir. */
+      var dom = (!mesa && st.dom) ? (Number(st.domc) || 0) : 0;
 
       var sh = document.createElement('div');
       sh.className = 'sheet';
       sh.innerHTML = '<div class="bd" data-cerrar="1"></div><div class="pn">' +
-        '<h3>Tu pedido</h3>' +
+        '<h3>' + (mesa ? 'Tu pedido · Mesa ' + mesa : 'Tu pedido') + '</h3>' +
         lineas.map(function (l) {
           return '<div class="line"><span>' + l.q + '× ' + esc(l.n) + '</span><b>' + money(l.p * l.q) + '</b></div>';
         }).join('') +
         (dom ? '<div class="line"><span>Domicilio</span><b>' + money(dom) + '</b></div>' : '') +
         '<div class="line tot"><span>Total</span><span>' + money(sub + dom) + '</span></div>' +
         '<div class="field" style="margin-top:16px"><label>Tu nombre</label><input class="inp" id="f-nom" placeholder="Cómo te llamas"></div>' +
-        (st.dom ? '<div class="field"><label>Dirección para el domicilio</label><input class="inp" id="f-dir" placeholder="Dirección y barrio (o escribe: recojo en el local)"></div>' : '') +
+        (!mesa && st.dom ? '<div class="field"><label>Dirección para el domicilio</label><input class="inp" id="f-dir" placeholder="Dirección y barrio (o escribe: recojo en el local)"></div>' : '') +
         '<div class="field"><label>Alguna nota</label><textarea class="inp" id="f-not" placeholder="Sin cebolla, bien caliente, etc."></textarea></div>' +
-        '<button class="btn wide" id="f-env" style="padding:15px;font-size:16px">Enviar pedido por WhatsApp</button>' +
+        (mesa ? '<p class="hint" style="margin:-6px 0 12px">Le llega al WhatsApp del negocio con el número de tu mesa. El mesero te lo confirma.</p>' : '') +
+        '<button class="btn wide" id="f-env" style="padding:15px;font-size:16px">' +
+          (mesa ? 'Mandar el pedido a la barra' : 'Enviar pedido por WhatsApp') + '</button>' +
         '<button class="btn ghost wide sm" data-cerrar="1" style="margin-top:8px">Seguir mirando la carta</button>' +
       '</div>';
       document.body.appendChild(sh);
@@ -694,7 +719,10 @@
         var nom = (sh.querySelector('#f-nom') || {}).value || '';
         var dir = (sh.querySelector('#f-dir') || {}).value || '';
         var not = (sh.querySelector('#f-not') || {}).value || '';
-        var txt = '*Pedido — ' + (st.n || '') + '*\n\n';
+        /* La mesa va de primero y sola: es lo que el mesero necesita ver de un vistazo. */
+        var txt = mesa
+          ? '*🍽️ MESA ' + mesa + '*\n' + (st.n || '') + '\n\n'
+          : '*Pedido — ' + (st.n || '') + '*\n\n';
         lineas.forEach(function (l) { txt += '• ' + l.q + 'x ' + l.n + ' — ' + money(l.p * l.q) + '\n'; });
         txt += '\nSubtotal: ' + money(sub) + '\n';
         if (dom) txt += 'Domicilio: ' + money(dom) + '\n';
@@ -702,7 +730,9 @@
         if (nom.trim()) txt += '\nNombre: ' + nom.trim();
         if (dir.trim()) txt += '\nDirección: ' + dir.trim();
         if (not.trim()) txt += '\nNota: ' + not.trim();
-        txt += '\n\n_Pedido armado desde su carta digital_';
+        txt += mesa
+          ? '\n\n_Pedido tomado desde el QR de la mesa ' + mesa + '_'
+          : '\n\n_Pedido armado desde su carta digital_';
         window.open('https://wa.me/' + waNum(st.w) + '?text=' + encodeURIComponent(txt), '_blank');
         sh.remove();
       });
@@ -793,6 +823,54 @@
     return cv;
   }
 
+  /* Hoja para imprimir: un aviso por mesa, 4 por página. Se imprime desde el
+     navegador en vez de descargar 20 PNG sueltos. */
+  function vistaMesas(st) {
+    pintarTema(st);
+    var total = Math.min(MAX_MESAS, Number(st.mesas) || 0);
+    document.title = 'Avisos de mesa — ' + (st.n || 'MiCarta');
+    if (!total) { location.hash = '#/nueva'; return; }
+
+    var paginas = '';
+    for (var desde = 1; desde <= total; desde += 4) {
+      var tarjetas = '';
+      for (var m = desde; m < desde + 4 && m <= total; m++) {
+        tarjetas += '<div class="tarjeta">' +
+          '<div class="neg">' + esc(st.e || '🍽️') + ' ' + esc(st.n || '') + '</div>' +
+          '<div class="num">Mesa ' + m + '</div>' +
+          '<div class="qr" data-qr="' + m + '"></div>' +
+          '<div class="ins"><b>Escanea y mira la carta</b>Arma tu pedido desde el celular y ' +
+          'te lo confirmamos en la mesa.</div>' +
+        '</div>';
+      }
+      paginas += '<div class="pagina">' + tarjetas + '</div>';
+    }
+
+    var root = mount(
+      '<div class="noprint barra-print">' +
+        '<a class="btn ghost sm" href="#/publicado">← Volver</a>' +
+        '<span>' + total + ' avisos · 4 por hoja</span>' +
+        '<button class="btn sm" data-act="imprimir">🖨️ Imprimir</button>' +
+      '</div>' +
+      '<p class="noprint aviso-print">Imprime, recorta y pon uno en cada mesa. Si el papel se ' +
+      'moja o se ensucia, plastifícalo o métele un acetato: es lo único que va a tocar el cliente.</p>' +
+      '<div class="hojas">' + paginas + '</div>');
+
+    root.querySelectorAll('[data-qr]').forEach(function (caja) {
+      var m = Number(caja.getAttribute('data-qr'));
+      var q = qrCanvas(linkPublico(st, m), 560);
+      if (!q) { caja.textContent = 'La carta es muy larga para un QR'; return; }
+      var img = new Image();
+      img.src = q.toDataURL('image/png');
+      img.alt = 'QR de la mesa ' + m;
+      caja.appendChild(img);
+    });
+
+    root.addEventListener('click', function (ev) {
+      if (ev.target.closest('[data-act="imprimir"]')) window.print();
+    });
+  }
+
   function vistaPublicado(st) {
     pintarTema(st);
     var pub = linkPublico(st);
@@ -826,8 +904,15 @@
         '<p class="hint" style="text-align:center">El aviso sale listo para imprimir en hoja tamaño carta.</p>' +
       '</div>' +
 
+      (Number(st.mesas) ? '<div class="card"><h3>3. Un QR para cada mesa 🍽️</h3>' +
+        '<p class="cs">Cada mesa lleva su propio código. Cuando el cliente pide, a ti te llega el ' +
+        'pedido escrito y arriba, en grande, de qué mesa es. El mesero deja de anotar y pasa a confirmar.</p>' +
+        '<a class="btn wide" href="' + esc(linkMesas(st)) + '">Ver los ' + Math.min(MAX_MESAS, Number(st.mesas)) + ' avisos para imprimir</a>' +
+        '<p class="hint" style="text-align:center;margin-top:8px">Salen 4 por hoja, listos para recortar.</p>' +
+      '</div>' : '') +
+
       '<div class="card" style="background:var(--acc-soft);border-color:transparent">' +
-        '<h3>3. ⚠️ Guarda tu link secreto de edición</h3>' +
+        '<h3>' + (Number(st.mesas) ? '4' : '3') + '. ⚠️ Guarda tu link secreto de edición</h3>' +
         '<p class="cs">Con este link vuelves a editar precios y productos. <b>Si lo pierdes, tienes que hacer la carta otra vez.</b> Mándatelo a ti mismo por WhatsApp ahora mismo.</p>' +
         '<div class="grid2">' +
           '<button class="btn" data-act="guardar-wa">Mandármelo a mi WhatsApp</button>' +
@@ -835,7 +920,7 @@
         '</div>' +
       '</div>' +
 
-      '<div class="card"><h3>4. Ponle un nombre corto a tu link</h3>' +
+      '<div class="card"><h3>' + (Number(st.mesas) ? '5' : '4') + '. Ponle un nombre corto a tu link</h3>' +
         '<p class="cs">En vez del link largo, tu carta queda en una dirección que la gente puede escribir de memoria ' +
         'o dictar por teléfono. Sirve para la bio de Instagram y para el letrero del local.</p>' +
         '<div class="corto"><span>micarta.weissailab.com/</span>' +

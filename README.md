@@ -18,6 +18,11 @@ El dueño de un negocio arma su carta en el navegador (3 minutos), y recibe:
 El cliente final abre la carta en su celular, arma el pedido con cantidades, y le llega al
 WhatsApp del negocio ya redactado y sumado, con domicilio, nombre, dirección y notas.
 
+**Mesas.** Si el negocio atiende en el local, se genera un QR distinto por mesa
+(`#/c/<carta>/m/4`) y una hoja imprimible con un aviso por mesa, 4 por página. El pedido
+llega encabezado por el número de mesa, y en ese modo no se pide dirección ni domicilio.
+No reemplaza al mesero: le llega escrito lo que el cliente quiere, y él confirma.
+
 ## Cómo está hecho (y por qué no hay servidor)
 
 La carta completa se comprime con LZ-string y viaja **dentro del link**, en el fragmento
