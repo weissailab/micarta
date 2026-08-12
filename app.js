@@ -665,6 +665,14 @@
   function medidorHTML(st) {
     var largo = pesoLink(st);
     var fotos = contarFotos(st);
+
+    /* Con cuenta el peso deja de ser un problema: las fotos viven en el servidor
+       y el QR apunta a la direccion fija, no a la carta. */
+    if (baseCorta(st) && cuenta && cuenta.carta_id) {
+      return '<div class="med verde"><b>Sin límite de peso</b>' +
+        'Tu carta vive en el servidor y el QR apunta a <b>micarta.weissailab.com/' + esc(st.corto) + '</b>. ' +
+        'Ponle todas las fotos que quieras: el código QR no se daña.</div>';
+    }
     if (largo > TOPE_LINK) {
       return '<div class="med rojo"><b>El link quedó demasiado pesado</b>' +
         'Con ' + fotos + ' fotos son ' + Math.round(largo / 1024) + ' KB y algunos celulares no lo abren. ' +
