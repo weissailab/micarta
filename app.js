@@ -211,6 +211,43 @@
     img.src = url;
   }
 
+  /* Referencia -> enlace firmado. La carta guarda `r2:<clave>`, que es estable;
+     el enlace para VER la imagen caduca y por eso vive aparte y no se guarda. */
+  var fotosUrl = {};
+
+  function srcFoto(it) {
+    if (!it || typeof it.f !== 'string' || !it.f) return null;
+    if (it.f.slice(0, 3) === 'r2:') return fotosUrl[it.f] || null;
+    return it.f; // data: en modo anonimo, o https: ya firmado en la vista publica
+  }
+
+  /* Con cuenta: los bytes van al servidor y la carta guarda una referencia.
+     Se manda el archivo tal cual y el servidor lo reprocesa; asi entra hasta un
+     HEIC de iPhone, que el navegador no sabe abrir. */
+  async function subirFotoAlServidor(file, gi, ii) {
+    if (file.size > 8000000) return toast('Esa imagen pesa demasiado, usa una más liviana');
+    toast('Subiendo la foto…');
+    try {
+      var res = await fetch(API + '/api/micarta/foto?carta=' + encodeURIComponent(cuenta.carta_id), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + cuenta.token, 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+      var r = null;
+      try { r = await res.json(); } catch (e) {}
+      if (res.status === 401) { cuentaGuardar(null); return toast('Se cerró tu sesión, entra otra vez'); }
+      if (!res.ok) return toast((r && r.mensaje) || 'No se pudo subir la foto');
+
+      S.g[gi].i[ii].f = r.ref;   // lo que se guarda: estable
+      fotosUrl[r.ref] = r.url;   // lo que se ve: caduca, no se guarda
+      guardar(S);
+      vistaEditor();
+      toast('Foto lista (' + Math.round(r.bytes / 1024) + ' KB)');
+    } catch (e) {
+      toast('No se pudo subir la foto. Revisa tu conexión.');
+    }
+  }
+
   function contarFotos(st) {
     return st.g.reduce(function (a, g) {
       return a + g.i.filter(function (i) { return i.f; }).length;
@@ -482,17 +519,26 @@
       }
       if (act === 'foto') {
         var actual = S.g[gi].i[ii];
-        if (!actual.f && contarFotos(S) >= MAX_FOTOS) {
-          return toast('Máximo ' + MAX_FOTOS + ' fotos: el link se vuelve muy pesado');
+        var enCuenta = cuenta && cuenta.token && cuenta.carta_id;
+
+        /* Con cuenta la foto va a R2 y en la carta queda una referencia, asi que
+           no hay tope de 12 ni hay que apretarla a 3 KB. Sin cuenta, la foto
+           tiene que caber dentro del link. */
+        if (!enCuenta && !actual.f && contarFotos(S) >= MAX_FOTOS) {
+          return toast('Máximo ' + MAX_FOTOS + ' fotos sin cuenta. Entra con Google y suben más.');
         }
-        toast('Preparando la foto…');
+
         return pedirFoto(function (file) {
-          comprimirFoto(file, function (dataUrl) {
-            S.g[gi].i[ii].f = dataUrl;
-            guardar(S);
-            vistaEditor();
-            toast('Foto lista (' + Math.round(dataUrl.length / 1024) + ' KB)');
-          }, function () { toast('No pude leer esa imagen, prueba con otra'); });
+          if (!enCuenta) {
+            toast('Preparando la foto…');
+            return comprimirFoto(file, function (dataUrl) {
+              S.g[gi].i[ii].f = dataUrl;
+              guardar(S);
+              vistaEditor();
+              toast('Foto lista (' + Math.round(dataUrl.length / 1024) + ' KB)');
+            }, function () { toast('No pude leer esa imagen, prueba con otra'); });
+          }
+          subirFotoAlServidor(file, gi, ii);
         });
       }
       if (act === 'add-cat') { S.g.push({ n: '', i: [item()] }); guardar(S); return vistaEditor(); }
@@ -564,9 +610,10 @@
   function panelCarta() {
     var cats = S.g.map(function (g, gi) {
       var items = g.i.map(function (it, ii) {
-        var izq = it.f
+        var src = srcFoto(it);
+        var izq = src
           ? '<button class="emo foto" data-act="foto" data-g="' + gi + '" data-i="' + ii + '" title="Cambiar la foto">' +
-              '<img src="' + esc(it.f) + '" alt=""><span class="x" data-act="quitar-foto" data-g="' + gi + '" data-i="' + ii + '" title="Quitar la foto">✕</span></button>'
+              '<img src="' + esc(src) + '" alt=""><span class="x" data-act="quitar-foto" data-g="' + gi + '" data-i="' + ii + '" title="Quitar la foto">✕</span></button>'
           : '<input class="emo" data-k="g.' + gi + '.i.' + ii + '.e" maxlength="2" value="' + esc(it.e) + '" placeholder="🍽️" title="Ícono">';
 
         return '<div class="item' + (it.x ? ' out' : '') + '">' + izq +
@@ -662,8 +709,8 @@
         body += '<div class="c-cat" id="cat' + gi + '">' + esc(g.n || 'Menú') + '</div>';
         g.i.forEach(function (it, ii) {
           body += '<div class="c-item' + (it.x ? ' out' : '') + '" data-add="' + gi + '.' + ii + '">' +
-            (it.f
-              ? '<div class="e foto" data-ver="' + gi + '.' + ii + '"><img src="' + esc(it.f) + '" alt="' + esc(it.n) + '" loading="lazy"></div>'
+            (srcFoto(it)
+              ? '<div class="e foto" data-ver="' + gi + '.' + ii + '"><img src="' + esc(srcFoto(it)) + '" alt="' + esc(it.n) + '" loading="lazy"></div>'
               : '<div class="e">' + esc(it.e || '🍽️') + '</div>') +
             '<div class="d"><b>' + esc(it.n || 'Producto') + '</b>' +
               (it.d ? '<small>' + esc(it.d) + '</small>' : '') +
@@ -774,7 +821,7 @@
       var sh = document.createElement('div');
       sh.className = 'sheet';
       sh.innerHTML = '<div class="bd" data-cerrar="1"></div><div class="pn detalle">' +
-        '<img class="grande" src="' + esc(it.f) + '" alt="' + esc(it.n) + '">' +
+        '<img class="grande" src="' + esc(srcFoto(it) || '') + '" alt="' + esc(it.n) + '">' +
         '<h3>' + esc(it.n) + '</h3>' +
         (it.d ? '<p class="cs">' + esc(it.d) + '</p>' : '') +
         '<div class="line tot"><span>' + (Number(it.p) ? money(it.p) : 'Pregúntanos') + '</span></div>' +
@@ -1013,6 +1060,52 @@
     if (boton.dataset.antes) boton.textContent = boton.dataset.antes;
   }
 
+  /* El servidor no acepta fotos incrustadas: engordarian la base sin techo.
+     Si el dueno hizo su carta en modo anonimo y despues entro con su cuenta,
+     aqui se suben esas fotos a R2 y se cambian por su referencia, para que no
+     pierda el trabajo. */
+  function fotosIncrustadas(st) {
+    var lista = [];
+    st.g.forEach(function (g, gi) {
+      g.i.forEach(function (it, ii) {
+        if (typeof it.f === 'string' && it.f.slice(0, 5) === 'data:') lista.push([gi, ii]);
+      });
+    });
+    return lista;
+  }
+
+  function sinFotosIncrustadas(st) {
+    var copia = JSON.parse(JSON.stringify(st));
+    copia.g.forEach(function (g) {
+      g.i.forEach(function (it) {
+        if (typeof it.f === 'string' && it.f.slice(0, 5) === 'data:') delete it.f;
+      });
+    });
+    return copia;
+  }
+
+  async function subirPendientes(cartaId) {
+    var pendientes = fotosIncrustadas(S);
+    for (var k = 0; k < pendientes.length; k++) {
+      var gi = pendientes[k][0], ii = pendientes[k][1];
+      try {
+        var blob = await (await fetch(S.g[gi].i[ii].f)).blob();
+        var res = await fetch(API + '/api/micarta/foto?carta=' + encodeURIComponent(cartaId), {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + cuenta.token, 'Content-Type': blob.type || 'image/webp' },
+          body: blob,
+        });
+        if (!res.ok) { delete S.g[gi].i[ii].f; continue; }
+        var r = await res.json();
+        S.g[gi].i[ii].f = r.ref;
+        fotosUrl[r.ref] = r.url;
+      } catch (e) {
+        delete S.g[gi].i[ii].f;
+      }
+    }
+    return pendientes.length;
+  }
+
   async function reservar(boton) {
     var campo = document.getElementById('f-corto');
     var aviso = document.getElementById('corto-aviso');
@@ -1027,19 +1120,39 @@
     }
 
     ocupado(boton, 'Guardando…');
-    var r = await api('/api/micarta/carta', { metodo: 'POST', cuerpo: { datos: S, nombre_corto: n } });
-    libre(boton);
+    // Primera pasada sin las fotos incrustadas: hace falta el carta_id para
+    // poder subirlas, y ese solo existe despues de guardar.
+    var r = await api('/api/micarta/carta', {
+      metodo: 'POST',
+      cuerpo: { datos: sinFotosIncrustadas(S), nombre_corto: n },
+    });
 
-    if (r.estado === 401) { toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
-    if (r.estado === 409) return malo('Ese nombre ya lo tiene otro negocio. Prueba con otro.');
-    if (r.estado === 400 && r.datos && r.datos.error === 'nombre_invalido') {
-      return malo('Ese nombre está reservado por el sistema. Escoge otro.');
+    if (r.estado === 401) { libre(boton); toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
+    if (r.estado === 409 && r.datos && r.datos.error === 'demasiadas_cartas') {
+      libre(boton);
+      return malo(r.datos.mensaje);
+    }
+    if (r.estado === 409) { libre(boton); return malo('Ese nombre ya lo tiene otro negocio. Prueba con otro.'); }
+    if (r.estado === 429) { libre(boton); return malo('Vas muy rápido. Espera un momento.'); }
+    if (r.estado === 400) {
+      libre(boton);
+      return malo((r.datos && r.datos.mensaje) || 'Ese nombre está reservado. Escoge otro.');
     }
     if (r.estado !== 201 && r.estado !== 200) {
+      libre(boton);
       return malo('No se pudo guardar. Revisa tu conexión y vuelve a intentar.');
     }
 
     var carta = r.datos.carta;
+
+    // Segunda pasada: ya hay carta_id, se suben las fotos y se vuelve a guardar.
+    if (fotosIncrustadas(S).length) {
+      ocupado(boton, 'Subiendo las fotos…');
+      cuenta.carta_id = carta.carta_id;
+      await subirPendientes(carta.carta_id);
+      await api('/api/micarta/carta', { metodo: 'POST', cuerpo: { carta_id: carta.carta_id, datos: S } });
+    }
+    libre(boton);
     S.corto = carta.nombre_corto;
     guardar(S);
     cuentaGuardar({
@@ -1054,13 +1167,19 @@
 
   async function guardarCambios(boton) {
     ocupado(boton, 'Guardando…');
+    if (fotosIncrustadas(S).length) {
+      ocupado(boton, 'Subiendo las fotos…');
+      await subirPendientes(cuenta.carta_id);
+    }
     var r = await api('/api/micarta/carta', {
       metodo: 'POST',
       cuerpo: { carta_id: cuenta.carta_id, datos: S },
     });
     libre(boton);
     if (r.estado === 401) { toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
-    if (r.estado !== 200) return toast('No se pudo guardar, intenta de nuevo');
+    if (r.estado === 429) return toast('Vas muy rápido, espera un momento');
+    if (r.estado !== 200) return toast((r.datos && r.datos.mensaje) || 'No se pudo guardar, intenta de nuevo');
+    guardar(S);
     toast('Guardado. Los QR impresos ya muestran esto ✅');
   }
 
@@ -1250,6 +1369,9 @@
       return;
     }
     if (r.estado !== 200) { caja.innerHTML = '<p class="sub">No se pudo cargar. Revisa tu conexión.</p>'; return; }
+
+    // Los enlaces para VER las fotos llegan aparte de la carta, porque caducan.
+    if (r.datos.fotos) Object.keys(r.datos.fotos).forEach(function (k) { fotosUrl[k] = r.datos.fotos[k]; });
 
     var cartas = r.datos.cartas || [];
     if (!cartas.length) {
