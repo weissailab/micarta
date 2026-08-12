@@ -19,7 +19,14 @@
 
      Nadie esta obligado a entrar: el modo anonimo no se degrada nunca. */
 
-  var cuenta = null; // { token, email, carta_id, nombre_corto }
+  var cuenta = null;   // quien entro: { token, email }
+  var edicion = null;  // que carta del servidor se esta editando: { cartaId, nombreCorto }
+
+  /* POR QUE ESTAN SEPARADOS. Antes la identidad de la carta vivia dentro de la
+     sesion, y al empezar una carta nueva se heredaba la de la anterior: el QR
+     de la nueva apuntaba a la vieja, y "Guardar cambios" la habria escrito
+     encima. La sesion dice QUIEN eres; la edicion dice QUE carta tienes abierta,
+     y esa se limpia cada vez que se empieza una carta desde cero. */
 
   function cuentaCargar() {
     try {
@@ -27,6 +34,32 @@
     } catch (e) {
       cuenta = null;
     }
+    try {
+      edicion = JSON.parse(localStorage.getItem('micarta:edicion') || 'null');
+    } catch (e) {
+      edicion = null;
+    }
+  }
+
+  function edicionGuardar(e) {
+    edicion = e;
+    try {
+      if (e) localStorage.setItem('micarta:edicion', JSON.stringify(e));
+      else localStorage.removeItem('micarta:edicion');
+    } catch (x) {}
+  }
+
+  /* Empezar de cero borra las dos cosas: el contenido y la identidad. Si se
+     olvidara la identidad, la carta nueva se guardaria encima de la anterior. */
+  function empezarDeCero() {
+    S = nuevaCarta();
+    edicionGuardar(null);
+    guardar(S);
+  }
+
+  /** ¿Esta carta ya vive en el servidor y es mia? */
+  function enServidor() {
+    return Boolean(cuenta && cuenta.token && edicion && edicion.cartaId);
   }
 
   function cuentaGuardar(c) {
@@ -52,12 +85,9 @@
     try {
       datos = JSON.parse(atob(token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')));
     } catch (e) {}
-    var previa = cuenta || {};
     cuentaGuardar({
       token: token,
-      email: datos.email || previa.email || '',
-      carta_id: previa.carta_id || null,
-      nombre_corto: previa.nombre_corto || null,
+      email: datos.email || (cuenta && cuenta.email) || '',
     });
     var limpio = location.hash.replace(/[#&]t=[^&]*/, '');
     if (limpio === '#' || limpio === '') limpio = '#/publicado';
@@ -228,7 +258,7 @@
     if (file.size > 8000000) return toast('Esa imagen pesa demasiado, usa una más liviana');
     toast('Subiendo la foto…');
     try {
-      var res = await fetch(API + '/api/micarta/foto?carta=' + encodeURIComponent(cuenta.carta_id), {
+      var res = await fetch(API + '/api/micarta/foto?carta=' + encodeURIComponent(edicion.cartaId), {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + cuenta.token, 'Content-Type': file.type || 'application/octet-stream' },
         body: file,
@@ -261,7 +291,7 @@
   function demo() {
     return {
       n: 'Asadero El Buen Sabor', t: 'Pollo a la brasa y carne al carbón',
-      w: '3001234567', e: '🍗', c: 0, a: 'Cra 12 #34-56, Barrio Centro', h: 'Todos los días 11am – 9pm',
+      w: '3001234567', e: '🍗', c: 0, corto: '', a: 'Cra 12 #34-56, Barrio Centro', h: 'Todos los días 11am – 9pm',
       dom: 1, domc: 4000,
       g: [
         { n: 'Pollo a la brasa', i: [
@@ -393,7 +423,17 @@
       if (e) { S = e; return vistaEditor(); }
       return vistaError();
     }
-    if (h === '#/nueva') { S = S || borrador() || nuevaCarta(); return vistaEditor(); }
+    if (h === '#/nueva') {
+      S = S || borrador() || nuevaCarta();
+      /* Cura de borradores viejos: si el borrador trae una direccion fija pero
+         no sabemos que carta del servidor es, esa direccion es de otra carta y
+         el QR apuntaria al negocio equivocado. */
+      if (S.corto && !(edicion && edicion.cartaId)) {
+        delete S.corto;
+        guardar(S);
+      }
+      return vistaEditor();
+    }
     if (h === '#/publicado') { return S ? vistaPublicado(S) : (location.hash = '#/nueva'); }
     document.title = 'MiCarta — tu carta digital con QR, gratis';
     document.documentElement.style.setProperty('--acc', THEMES[0].a);
@@ -519,7 +559,7 @@
       }
       if (act === 'foto') {
         var actual = S.g[gi].i[ii];
-        var enCuenta = cuenta && cuenta.token && cuenta.carta_id;
+        var enCuenta = enServidor();
 
         /* Con cuenta la foto va a R2 y en la carta queda una referencia, asi que
            no hay tope de 12 ni hay que apretarla a 3 KB. Sin cuenta, la foto
@@ -555,7 +595,8 @@
       if (act === 'demo') { S = demo(); guardar(S); return vistaEditor(); }
       if (act === 'limpiar') {
         if (!confirm('¿Empezar de cero? Se borra lo que llevas escrito.')) return;
-        S = nuevaCarta(); guardar(S); return vistaEditor();
+        empezarDeCero();
+        return vistaEditor();
       }
     });
   }
@@ -668,7 +709,7 @@
 
     /* Con cuenta el peso deja de ser un problema: las fotos viven en el servidor
        y el QR apunta a la direccion fija, no a la carta. */
-    if (baseCorta(st) && cuenta && cuenta.carta_id) {
+    if (baseCorta(st) && enServidor()) {
       return '<div class="med verde"><b>Sin límite de peso</b>' +
         'Tu carta vive en el servidor y el QR apunta a <b>micarta.weissailab.com/' + esc(st.corto) + '</b>. ' +
         'Ponle todas las fotos que quieras: el código QR no se daña.</div>';
@@ -1130,9 +1171,15 @@
     ocupado(boton, 'Guardando…');
     // Primera pasada sin las fotos incrustadas: hace falta el carta_id para
     // poder subirlas, y ese solo existe despues de guardar.
+    // Si esta carta ya existe en el servidor pero todavia no tiene direccion,
+    // hay que ponersela A ELLA. Sin esto se crearia una carta duplicada.
     var r = await api('/api/micarta/carta', {
       metodo: 'POST',
-      cuerpo: { datos: sinFotosIncrustadas(S), nombre_corto: n },
+      cuerpo: {
+        carta_id: edicion && edicion.cartaId ? edicion.cartaId : undefined,
+        datos: sinFotosIncrustadas(S),
+        nombre_corto: n,
+      },
     });
 
     if (r.estado === 401) { libre(boton); toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
@@ -1156,19 +1203,14 @@
     // Segunda pasada: ya hay carta_id, se suben las fotos y se vuelve a guardar.
     if (fotosIncrustadas(S).length) {
       ocupado(boton, 'Subiendo las fotos…');
-      cuenta.carta_id = carta.carta_id;
+      edicionGuardar({ cartaId: carta.carta_id, nombreCorto: carta.nombre_corto });
       await subirPendientes(carta.carta_id);
       await api('/api/micarta/carta', { metodo: 'POST', cuerpo: { carta_id: carta.carta_id, datos: S } });
     }
     libre(boton);
     S.corto = carta.nombre_corto;
     guardar(S);
-    cuentaGuardar({
-      token: cuenta.token,
-      email: cuenta.email,
-      carta_id: carta.carta_id,
-      nombre_corto: carta.nombre_corto,
-    });
+    edicionGuardar({ cartaId: carta.carta_id, nombreCorto: carta.nombre_corto });
     toast('Listo: tu dirección quedó fija 🎉');
     vistaPublicado(S);
   }
@@ -1177,11 +1219,11 @@
     ocupado(boton, 'Guardando…');
     if (fotosIncrustadas(S).length) {
       ocupado(boton, 'Subiendo las fotos…');
-      await subirPendientes(cuenta.carta_id);
+      await subirPendientes(edicion.cartaId);
     }
     var r = await api('/api/micarta/carta', {
       metodo: 'POST',
-      cuerpo: { carta_id: cuenta.carta_id, datos: S },
+      cuerpo: { carta_id: edicion.cartaId, datos: S },
     });
     libre(boton);
     if (r.estado === 401) { toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
@@ -1195,7 +1237,7 @@
   function tarjetaCuenta(st) {
     var n = Number(st.mesas) ? '5' : '4';
 
-    if (baseCorta(st) && cuenta && cuenta.carta_id) {
+    if (baseCorta(st) && enServidor()) {
       return '<div class="card" style="background:#e8f5ef;border-color:transparent">' +
         '<h3>' + n + '. Tu carta está guardada ✅</h3>' +
         '<p class="cs">Vive en <b>micarta.weissailab.com/' + esc(st.corto) + '</b> y esa dirección ya no cambia. ' +
@@ -1367,7 +1409,7 @@
     document.title = 'Mis cartas — MiCarta';
     var root = mount(barra('<button class="btn ghost sm" data-act="salir-cuenta">Salir</button>') +
       '<div class="pub"><h2 class="big">Mis cartas</h2><div id="lista"><p class="sub">Cargando…</p></div>' +
-      '<a class="btn ghost" href="#/nueva" style="margin-top:10px">+ Hacer otra carta</a></div>' + pie());
+      '<button class="btn ghost" data-act="otra-carta" style="margin-top:10px">+ Hacer otra carta</button></div>' + pie());
 
     var r = await api('/api/micarta/carta');
     var caja = document.getElementById('lista');
@@ -1402,8 +1444,14 @@
     }).join('');
 
     root.addEventListener('click', function (ev) {
+      if (ev.target.closest('[data-act="otra-carta"]')) {
+        empezarDeCero();
+        location.hash = '#/nueva';
+        return;
+      }
       if (ev.target.closest('[data-act="salir-cuenta"]')) {
         cuentaGuardar(null);
+        edicionGuardar(null);
         toast('Saliste de tu cuenta');
         location.hash = '#/';
         return;
@@ -1415,7 +1463,7 @@
       S = c.datos;
       S.corto = c.nombre_corto || '';
       guardar(S);
-      cuentaGuardar({ token: cuenta.token, email: cuenta.email, carta_id: c.carta_id, nombre_corto: c.nombre_corto });
+      edicionGuardar({ cartaId: c.carta_id, nombreCorto: c.nombre_corto });
       location.hash = '#/nueva';
     });
   }
