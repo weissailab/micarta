@@ -274,6 +274,8 @@
       setPath(S, k, v);
       guardar(S);
       if (k === 'c') pintarTema(S);
+      /* El costo del domicilio solo existe si hace domicilios: hay que repintar el panel. */
+      if (k === 'dom') return vistaEditor();
       renderPreview();
     });
 
