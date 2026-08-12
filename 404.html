@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Abriendo la carta…</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#E23E2E">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+<!--
+  ESTA PAGINA ES EL RESOLVEDOR DE LAS DIRECCIONES FIJAS.
+
+  GitHub Pages sirve 404.html para cualquier ruta que no exista como archivo, y
+  aqui se carga la misma aplicacion de siempre. Por eso
+  micarta.weissailab.com/lasespiga funciona sin servidor propio, sin tocar el
+  DNS y sin generar un archivo por cada negocio: app.js mira la ruta, le pide la
+  carta viva a la API y la pinta.
+
+  Las rutas son absolutas a proposito: este archivo se sirve desde cualquier
+  profundidad y las relativas romperian.
+-->
+<link rel="stylesheet" href="/app.css?v=6">
+</head>
+<body>
+<div id="app"></div>
+<script src="/vendor/lz-string.min.js"></script>
+<script src="/vendor/qrcode.js"></script>
+<script src="/app.js?v=6"></script>
+</body>
+</html>

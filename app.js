@@ -6,7 +6,79 @@
 
   var NEQUI = '3171715071';
   var SOPORTE_WA = '573171715071';
+  var API = 'https://panel.weissailab.com';
   var APP = document.getElementById('app');
+
+  /* ---------------- cuenta (modo 2: con Google) ----------------
+     MiCarta funciona de dos maneras y las dos son de verdad:
+
+     ANONIMO  — la carta viaja dentro del link. Cero registro, cero datos en
+                ningun servidor. Si cambias un precio, cambia el link.
+     CON CUENTA — la carta vive en el servidor y el link es fijo. Cambias
+                precios y el QR pegado en la mesa sigue sirviendo.
+
+     Nadie esta obligado a entrar: el modo anonimo no se degrada nunca. */
+
+  var cuenta = null; // { token, email, carta_id, nombre_corto }
+
+  function cuentaCargar() {
+    try {
+      cuenta = JSON.parse(localStorage.getItem('micarta:cuenta') || 'null');
+    } catch (e) {
+      cuenta = null;
+    }
+  }
+
+  function cuentaGuardar(c) {
+    cuenta = c;
+    try {
+      if (c) localStorage.setItem('micarta:cuenta', JSON.stringify(c));
+      else localStorage.removeItem('micarta:cuenta');
+    } catch (e) {}
+  }
+
+  function urlEntrar(volver) {
+    return API + '/micarta/entrar?volver=' + encodeURIComponent(location.origin + location.pathname + (volver || '#/publicado'));
+  }
+
+  /* El token llega en el fragmento, que no viaja al servidor. Se guarda y se
+     borra de la barra de direcciones enseguida para que no quede en el
+     historial ni en un pantallazo. */
+  function recogerToken() {
+    var m = location.hash.match(/[#&]t=([^&]+)/);
+    if (!m) return;
+    var token = m[1];
+    var datos = {};
+    try {
+      datos = JSON.parse(atob(token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')));
+    } catch (e) {}
+    var previa = cuenta || {};
+    cuentaGuardar({
+      token: token,
+      email: datos.email || previa.email || '',
+      carta_id: previa.carta_id || null,
+      nombre_corto: previa.nombre_corto || null,
+    });
+    var limpio = location.hash.replace(/[#&]t=[^&]*/, '');
+    if (limpio === '#' || limpio === '') limpio = '#/publicado';
+    history.replaceState(null, '', location.pathname + limpio);
+  }
+
+  async function api(ruta, opciones) {
+    opciones = opciones || {};
+    var cab = { 'Content-Type': 'application/json' };
+    if (cuenta && cuenta.token) cab.Authorization = 'Bearer ' + cuenta.token;
+    var res = await fetch(API + ruta, {
+      method: opciones.metodo || 'GET',
+      headers: cab,
+      body: opciones.cuerpo ? JSON.stringify(opciones.cuerpo) : undefined,
+    });
+    var cuerpo = null;
+    try { cuerpo = await res.json(); } catch (e) {}
+    // 401 = el token caduco o lo revocaron: se olvida y se vuelve a modo anonimo.
+    if (res.status === 401 && cuenta) { cuentaGuardar(null); }
+    return { estado: res.status, datos: cuerpo };
+  }
 
   /* Las fotos viajan dentro del link, así que cada byte se paga en el largo del
      link. Presupuesto por foto y tope de fotos para que no se vuelva inmanejable. */
@@ -198,11 +270,11 @@
     return location.origin + location.pathname + '#/mesas/' + encode(state);
   }
 
-  /* Un nombre corto es una redirección fija en el servidor de archivos: el QR
-     apunta ahí y no a la carta, así que editar precios ya no invalida lo impreso. */
+  /* Con nombre corto el QR apunta a una direccion fija y no a la carta, asi que
+     editar precios ya no invalida lo impreso. */
   function baseCorta(state) {
     var c = String(state.corto || '').trim().toLowerCase();
-    return /^[a-z0-9][a-z0-9-]{1,23}$/.test(c) ? location.origin + '/' + c + '/' : null;
+    return /^[a-z0-9][a-z0-9-]{1,23}$/.test(c) ? location.origin + '/' + c : null;
   }
 
   /* Lo que se mete DENTRO de un QR o de un impreso. Con nombre corto es una
@@ -251,6 +323,18 @@
 
   function router() {
     var h = location.hash || '';
+
+    // Direccion fija: /tunegocio (con ?m=4 si viene del QR de una mesa).
+    var ruta = location.pathname.replace(/^\/+|\/+$/g, '');
+    if (ruta && /^[a-z0-9][a-z0-9-]{1,23}$/.test(ruta) && !h) {
+      var mesa = Number((location.search.match(/[?&]m=(\d{1,3})/) || [])[1]) || 0;
+      return vistaPorNombre(ruta, mesa);
+    }
+
+    if (h === '#/mis-cartas') {
+      if (!cuenta || !cuenta.token) { location.href = urlEntrar('#/mis-cartas'); return; }
+      return vistaMisCartas();
+    }
     var mc = h.match(/^#\/c\/([^\/]+)(?:\/m\/(\d+))?$/);
     if (mc) {
       var d = decode(mc[1]);
@@ -294,7 +378,11 @@
 
   function vistaLanding() {
     var hayBorrador = borrador();
-    mount(barra('<a class="btn sm" href="#/nueva">Crear mi carta</a>') +
+    mount(barra(
+      (cuenta && cuenta.token
+        ? '<a class="btn ghost sm" href="#/mis-cartas">Mis cartas</a> '
+        : '<a class="btn ghost sm" href="' + esc(urlEntrar('#/mis-cartas')) + '">Entrar</a> ') +
+      '<a class="btn sm" href="#/nueva">Crear mi carta</a>') +
       '<div class="wrap"><div class="hero">' +
         '<div class="kicker">☕ Gratis · sin registro · sin instalar nada</div>' +
         '<h1>Tu carta digital con <em>código QR</em>, en 3 minutos</h1>' +
@@ -454,11 +542,11 @@
       '<div class="field"><label>Horario</label>' +
         '<input class="inp" data-k="h" placeholder="Lun a Sáb, 8am – 8pm" value="' + esc(S.h) + '"></div></div>' +
       '<div class="field"><label>Color</label><div class="swatches">' + sw + '</div></div>' +
-      '<div class="field"><label>Nombre corto <span style="font-weight:400">(solo si ya te lo entregamos)</span></label>' +
-        '<div class="corto"><span>micarta.weissailab.com/</span>' +
-        '<input class="inp" data-k="corto" placeholder="tunegocio" maxlength="24" autocapitalize="off" autocomplete="off" spellcheck="false" value="' + esc(S.corto || '') + '"></div>' +
-        '<p class="hint">Si lo tienes, los códigos QR apuntan ahí y <b>ya no hay que reimprimirlos</b> ' +
-        'cuando cambies precios. Si lo inventas sin que te lo hayamos creado, los QR no van a servir.</p></div>' +
+      (baseCorta(S)
+        ? '<div class="field"><label>Tu dirección fija</label>' +
+            '<div class="med verde" style="margin:0"><b>micarta.weissailab.com/' + esc(S.corto) + '</b>' +
+            'Los QR impresos apuntan aquí. Cambia precios las veces que quieras: no hay que reimprimir nada.</div></div>'
+        : '') +
       '<div class="field"><label>Mesas en el local</label>' +
         '<input class="inp" data-k="mesas" data-num="1" inputmode="numeric" placeholder="0" value="' + (S.mesas ? Number(S.mesas).toLocaleString('es-CO') : '') + '">' +
         '<p class="hint">Si pones un número, te genero un QR distinto para cada mesa y el pedido ' +
@@ -754,6 +842,20 @@
           ? '\n\n_Pedido tomado desde el QR de la mesa ' + mesa + '_'
           : '\n\n_Pedido armado desde su carta digital_';
         window.open('https://wa.me/' + waNum(st.w) + '?text=' + encodeURIComponent(txt), '_blank');
+
+        /* Aviso anonimo de que se armo un pedido: ni el nombre, ni la direccion,
+           ni los productos salen de este celular. Solo "uno mas" y el monto, que
+           es lo que despues le permite al dueno ver si su carta sirve. Si falla,
+           al cliente no le pasa nada: ya se fue a WhatsApp. */
+        if (slugActual) {
+          fetch(API + '/api/micarta/pedido', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre: slugActual, mesa: mesa || 0, monto: sub + dom }),
+            keepalive: true,
+          }).catch(function () {});
+        }
+
         sh.remove();
       });
     }
@@ -898,6 +1000,107 @@
     });
   }
 
+  function ocupado(boton, texto) {
+    boton.disabled = true;
+    boton.dataset.antes = boton.textContent;
+    boton.textContent = texto;
+  }
+  function libre(boton) {
+    boton.disabled = false;
+    if (boton.dataset.antes) boton.textContent = boton.dataset.antes;
+  }
+
+  async function reservar(boton) {
+    var campo = document.getElementById('f-corto');
+    var aviso = document.getElementById('corto-aviso');
+    var n = String(campo.value || '').trim().toLowerCase().replace(/\s+/g, '');
+    var malo = function (texto) {
+      campo.focus();
+      aviso.style.color = 'var(--acc)';
+      aviso.textContent = texto;
+    };
+    if (!/^[a-z0-9][a-z0-9-]{1,23}$/.test(n)) {
+      return malo('Ese nombre no sirve: entre 2 y 24 caracteres, letras sin tildes, números y guiones.');
+    }
+
+    ocupado(boton, 'Guardando…');
+    var r = await api('/api/micarta/carta', { metodo: 'POST', cuerpo: { datos: S, nombre_corto: n } });
+    libre(boton);
+
+    if (r.estado === 401) { toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
+    if (r.estado === 409) return malo('Ese nombre ya lo tiene otro negocio. Prueba con otro.');
+    if (r.estado === 400 && r.datos && r.datos.error === 'nombre_invalido') {
+      return malo('Ese nombre está reservado por el sistema. Escoge otro.');
+    }
+    if (r.estado !== 201 && r.estado !== 200) {
+      return malo('No se pudo guardar. Revisa tu conexión y vuelve a intentar.');
+    }
+
+    var carta = r.datos.carta;
+    S.corto = carta.nombre_corto;
+    guardar(S);
+    cuentaGuardar({
+      token: cuenta.token,
+      email: cuenta.email,
+      carta_id: carta.carta_id,
+      nombre_corto: carta.nombre_corto,
+    });
+    toast('Listo: tu dirección quedó fija 🎉');
+    vistaPublicado(S);
+  }
+
+  async function guardarCambios(boton) {
+    ocupado(boton, 'Guardando…');
+    var r = await api('/api/micarta/carta', {
+      metodo: 'POST',
+      cuerpo: { carta_id: cuenta.carta_id, datos: S },
+    });
+    libre(boton);
+    if (r.estado === 401) { toast('Se cerró tu sesión, entra otra vez'); return vistaPublicado(S); }
+    if (r.estado !== 200) return toast('No se pudo guardar, intenta de nuevo');
+    toast('Guardado. Los QR impresos ya muestran esto ✅');
+  }
+
+  /* Las tres caras del modo cuenta: sin entrar, entrado sin guardar, y guardado. */
+  function tarjetaCuenta(st) {
+    var n = Number(st.mesas) ? '5' : '4';
+
+    if (baseCorta(st) && cuenta && cuenta.carta_id) {
+      return '<div class="card" style="background:#e8f5ef;border-color:transparent">' +
+        '<h3>' + n + '. Tu carta está guardada ✅</h3>' +
+        '<p class="cs">Vive en <b>micarta.weissailab.com/' + esc(st.corto) + '</b> y esa dirección ya no cambia. ' +
+        'Cuando subas un precio, entras, editas y guardas: los QR impresos siguen sirviendo.</p>' +
+        '<div class="grid2">' +
+          '<button class="btn" data-act="guardar-cambios">Guardar cambios</button>' +
+          '<a class="btn ghost" href="#/mis-cartas">Ver mis cartas</a>' +
+        '</div>' +
+        '<p class="hint" style="text-align:center;margin-top:8px">Entraste como ' + esc(cuenta.email || '') + '</p>' +
+      '</div>';
+    }
+
+    if (cuenta && cuenta.token) {
+      return '<div class="card" style="background:var(--acc-soft);border-color:transparent">' +
+        '<h3>' + n + '. Escoge tu dirección fija</h3>' +
+        '<p class="cs">Es la que va impresa. Escríbela corta y fácil de dictar por teléfono. ' +
+        '<b>No se puede cambiar después</b>, justamente para que lo impreso no se dañe.</p>' +
+        '<div class="corto"><span>micarta.weissailab.com/</span>' +
+          '<input class="inp" id="f-corto" placeholder="tunegocio" maxlength="24" autocapitalize="off" autocomplete="off" spellcheck="false"></div>' +
+        '<p class="hint" id="corto-aviso">Letras sin tildes, números y guiones. Entre 2 y 24 caracteres.</p>' +
+        '<button class="btn wide" data-act="reservar">Guardar mi carta y reservar</button>' +
+      '</div>';
+    }
+
+    return '<div class="card"><h3>' + n + '. ¿Vas a cambiar precios alguna vez?</h3>' +
+      '<p class="cs">Como está ahora, tu carta viaja dentro del link: es gratis, anónima y no guardamos nada. ' +
+      'Pero si cambias un precio, cambia el link y el QR impreso queda viejo.</p>' +
+      '<p class="cs">Si entras con Google, tu carta queda guardada con una dirección fija ' +
+      '(<b>micarta.weissailab.com/tunegocio</b>) y ya <b>no vuelves a imprimir nunca</b>. ' +
+      'Sigue siendo gratis.</p>' +
+      '<a class="btn wide" href="' + esc(urlEntrar('#/publicado')) + '">Entrar con Google y fijar mi dirección</a>' +
+      '<p class="hint" style="text-align:center;margin-top:8px">Si prefieres no registrarte, no pasa nada: lo de arriba funciona igual.</p>' +
+    '</div>';
+  }
+
   function vistaPublicado(st) {
     pintarTema(st);
     var pub = linkPublico(st);
@@ -959,15 +1162,7 @@
         '</div>' +
       '</div>' +
 
-      '<div class="card"><h3>' + (Number(st.mesas) ? '5' : '4') + '. Ponle un nombre corto a tu link</h3>' +
-        '<p class="cs">En vez del link largo, tu carta queda en una dirección que la gente puede escribir de memoria ' +
-        'o dictar por teléfono. Sirve para la bio de Instagram y para el letrero del local.</p>' +
-        '<div class="corto"><span>micarta.weissailab.com/</span>' +
-          '<input class="inp" id="f-corto" placeholder="tunegocio" maxlength="24" autocapitalize="off" autocomplete="off" spellcheck="false"></div>' +
-        '<p class="hint" id="corto-aviso">Letras sin tildes, números y guiones. Entre 2 y 24 caracteres.</p>' +
-        '<button class="btn wide" data-act="pedir-corto">Pedir mi nombre corto</button>' +
-        '<p class="hint" style="text-align:center;margin-top:8px">Lo dejo listo yo y te confirmo por WhatsApp.</p>' +
-      '</div>' +
+      tarjetaCuenta(st) +
 
       '<div class="card nequi"><h3>¿Te sirvió? 🙏</h3>' +
         '<p class="cs">MiCarta es gratis y sin publicidad. Si te ahorró una tarde y unos pesos de impresión, mándame lo que consideres a Nequi. Con eso sigue siendo gratis para el que viene detrás.</p>' +
@@ -1015,22 +1210,8 @@
       var b = ev.target.closest('[data-act]');
       if (!b) return;
       var a = b.getAttribute('data-act');
-      if (a === 'pedir-corto') {
-        var campo = document.getElementById('f-corto');
-        var n = String(campo.value || '').trim().toLowerCase().replace(/\s+/g, '');
-        var aviso = document.getElementById('corto-aviso');
-        if (!/^[a-z0-9][a-z0-9-]{1,23}$/.test(n)) {
-          campo.focus();
-          aviso.style.color = 'var(--acc)';
-          aviso.textContent = 'Ese nombre no sirve: entre 2 y 24 caracteres, letras sin tildes, números y guiones.';
-          return;
-        }
-        campo.value = n;
-        window.open('https://wa.me/' + SOPORTE_WA + '?text=' + encodeURIComponent(
-          'Hola, quiero el nombre corto *micarta.weissailab.com/' + n + '* para la carta de ' +
-          (st.n || 'mi negocio') + '.\n\nEste es mi link:\n' + pub), '_blank');
-        return;
-      }
+      if (a === 'reservar') return reservar(b);
+      if (a === 'guardar-cambios') return guardarCambios(b);
       if (a === 'copiar-pub') return copy(pub, 'Link copiado ✅');
       if (a === 'copiar-edi') return copy(edi, 'Link de edición copiado ✅');
       if (a === 'copiar-nequi') return copy(NEQUI, 'Número de Nequi copiado 🙏');
@@ -1050,7 +1231,97 @@
     });
   }
 
+  /* ---------------- mis cartas ---------------- */
+
+  async function vistaMisCartas() {
+    document.title = 'Mis cartas — MiCarta';
+    var root = mount(barra('<button class="btn ghost sm" data-act="salir-cuenta">Salir</button>') +
+      '<div class="pub"><h2 class="big">Mis cartas</h2><div id="lista"><p class="sub">Cargando…</p></div>' +
+      '<a class="btn ghost" href="#/nueva" style="margin-top:10px">+ Hacer otra carta</a></div>' + pie());
+
+    var r = await api('/api/micarta/carta');
+    var caja = document.getElementById('lista');
+    if (r.estado === 401) {
+      caja.innerHTML = '<p class="sub">Tu sesión se venció.</p>' +
+        '<a class="btn" href="' + esc(urlEntrar('#/mis-cartas')) + '">Entrar otra vez</a>';
+      return;
+    }
+    if (r.estado !== 200) { caja.innerHTML = '<p class="sub">No se pudo cargar. Revisa tu conexión.</p>'; return; }
+
+    var cartas = r.datos.cartas || [];
+    if (!cartas.length) {
+      caja.innerHTML = '<p class="sub">Todavía no has guardado ninguna carta.</p>' +
+        '<a class="btn" href="#/nueva">Hacer mi primera carta</a>';
+      return;
+    }
+
+    caja.innerHTML = cartas.map(function (c) {
+      var dir = c.nombre_corto ? 'micarta.weissailab.com/' + esc(c.nombre_corto) : 'sin dirección fija';
+      return '<div class="card"><h3>' + esc(c.negocio || 'Sin nombre') + '</h3>' +
+        '<p class="cs">' + dir + ' · ' + (c.datos && c.datos.g ? c.datos.g.reduce(function (a, g) { return a + g.i.length; }, 0) : 0) +
+        ' productos' + (c.mesas ? ' · ' + c.mesas + ' mesas' : '') + '</p>' +
+        '<div class="grid2">' +
+          '<button class="btn" data-editar="' + esc(c.carta_id) + '">Editar precios</button>' +
+          (c.nombre_corto
+            ? '<a class="btn ghost" href="/' + esc(c.nombre_corto) + '" target="_blank" rel="noopener">Ver mi carta</a>'
+            : '') +
+        '</div></div>';
+    }).join('');
+
+    root.addEventListener('click', function (ev) {
+      if (ev.target.closest('[data-act="salir-cuenta"]')) {
+        cuentaGuardar(null);
+        toast('Saliste de tu cuenta');
+        location.hash = '#/';
+        return;
+      }
+      var b = ev.target.closest('[data-editar]');
+      if (!b) return;
+      var c = cartas.filter(function (x) { return x.carta_id === b.getAttribute('data-editar'); })[0];
+      if (!c) return;
+      S = c.datos;
+      S.corto = c.nombre_corto || '';
+      guardar(S);
+      cuentaGuardar({ token: cuenta.token, email: cuenta.email, carta_id: c.carta_id, nombre_corto: c.nombre_corto });
+      location.hash = '#/nueva';
+    });
+  }
+
+  /* ---------------- direccion fija: micarta.weissailab.com/tunegocio ----------------
+     GitHub Pages sirve 404.html para cualquier ruta que no exista, y ese archivo
+     carga esta misma aplicacion. Asi el nombre corto es una URL limpia sin
+     necesidad de un servidor propio ni de tocar el DNS. */
+
+  var slugActual = null;
+
+  async function vistaPorNombre(slug, mesa) {
+    slugActual = slug;
+    mount('<div class="pub"><p class="sub">Abriendo la carta…</p></div>');
+
+    var res = await fetch(API + '/api/micarta/publica/' + encodeURIComponent(slug) + (mesa ? '?m=' + mesa : ''));
+    if (res.status === 404) {
+      document.title = 'Esta carta no existe — MiCarta';
+      mount(barra() + '<div class="pub"><div style="font-size:52px">🤔</div>' +
+        '<h2 class="big">Aquí no hay ninguna carta</h2>' +
+        '<p class="sub">La dirección <b>' + esc(location.host + '/' + slug) + '</b> no le pertenece a ningún negocio. ' +
+        'Puede estar mal escrita.</p><a class="btn" href="/">Hacer mi propia carta</a></div>' + pie());
+      return;
+    }
+    if (!res.ok) {
+      mount(barra() + '<div class="pub"><div style="font-size:52px">😕</div>' +
+        '<h2 class="big">No pudimos abrir la carta</h2>' +
+        '<p class="sub">Puede ser tu conexión. Vuelve a intentarlo en un momento.</p>' +
+        '<button class="btn" onclick="location.reload()">Reintentar</button></div>' + pie());
+      return;
+    }
+
+    var cuerpo = await res.json();
+    vistaCarta(cuerpo.datos, mesa);
+  }
+
   /* ---------------- arranque ---------------- */
   window.addEventListener('hashchange', function () { window.scrollTo(0, 0); router(); });
+  cuentaCargar();
+  recogerToken();
   router();
 })();
