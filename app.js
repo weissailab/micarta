@@ -89,7 +89,7 @@
   function nuevaCarta() {
     return {
       n: '', t: '', w: '', e: '🍔', c: 0, a: '', h: '',
-      dom: 0, domc: 0, mesas: 0,
+      dom: 0, domc: 0, mesas: 0, corto: '',
       g: [{ n: 'Para empezar', i: [item()] }]
     };
   }
@@ -197,6 +197,21 @@
   function linkMesas(state) {
     return location.origin + location.pathname + '#/mesas/' + encode(state);
   }
+
+  /* Un nombre corto es una redirección fija en el servidor de archivos: el QR
+     apunta ahí y no a la carta, así que editar precios ya no invalida lo impreso. */
+  function baseCorta(state) {
+    var c = String(state.corto || '').trim().toLowerCase();
+    return /^[a-z0-9][a-z0-9-]{1,23}$/.test(c) ? location.origin + '/' + c + '/' : null;
+  }
+
+  /* Lo que se mete DENTRO de un QR o de un impreso. Con nombre corto es una
+     dirección de 40 caracteres que además cabe siempre, aunque haya fotos. */
+  function linkQR(state, mesa) {
+    var base = baseCorta(state);
+    if (base) return base + (mesa ? '?m=' + mesa : '');
+    return linkPublico(state, mesa);
+  }
   function linkEdicion(state) {
     return location.origin + location.pathname + '#/e/' + encode(state);
   }
@@ -294,7 +309,7 @@
       '<div class="feats">' +
         '<div class="feat"><i>📱</i><b>El pedido llega listo</b><span>El cliente arma su pedido y le llega a tu WhatsApp con cantidades, dirección y el total ya sumado. Se acabó el "¿cuánto es todo?".</span></div>' +
         '<div class="feat"><i>🖨️</i><b>QR listo para imprimir</b><span>Te descargas el código QR y hasta un aviso para poner en la mesa o pegar en la vitrina. Sin diseñador.</span></div>' +
-        '<div class="feat"><i>✏️</i><b>Cambias precios cuando quieras</b><span>¿Subió el pollo? Entras, cambias el precio y listo. Vuelves a imprimir solo si cambias tu link.</span></div>' +
+        '<div class="feat"><i>✏️</i><b>Cambias precios cuando quieras</b><span>¿Subió el pollo? Entras con tu link de edición, cambias y listo. Eso sí: al cambiar la carta cambia el link, así que el QR impreso hay que volverlo a sacar (o pides tu nombre corto y no reimprimes nunca más).</span></div>' +
       '</div>' +
       '<div class="steps"><h2>Cómo funciona</h2><ol>' +
         '<li><strong>Escribes tu carta.</strong> Nombre del negocio, tu WhatsApp y tus productos con precio.</li>' +
@@ -439,6 +454,11 @@
       '<div class="field"><label>Horario</label>' +
         '<input class="inp" data-k="h" placeholder="Lun a Sáb, 8am – 8pm" value="' + esc(S.h) + '"></div></div>' +
       '<div class="field"><label>Color</label><div class="swatches">' + sw + '</div></div>' +
+      '<div class="field"><label>Nombre corto <span style="font-weight:400">(solo si ya te lo entregamos)</span></label>' +
+        '<div class="corto"><span>micarta.weissailab.com/</span>' +
+        '<input class="inp" data-k="corto" placeholder="tunegocio" maxlength="24" autocapitalize="off" autocomplete="off" spellcheck="false" value="' + esc(S.corto || '') + '"></div>' +
+        '<p class="hint">Si lo tienes, los códigos QR apuntan ahí y <b>ya no hay que reimprimirlos</b> ' +
+        'cuando cambies precios. Si lo inventas sin que te lo hayamos creado, los QR no van a servir.</p></div>' +
       '<div class="field"><label>Mesas en el local</label>' +
         '<input class="inp" data-k="mesas" data-num="1" inputmode="numeric" placeholder="0" value="' + (S.mesas ? Number(S.mesas).toLocaleString('es-CO') : '') + '">' +
         '<p class="hint">Si pones un número, te genero un QR distinto para cada mesa y el pedido ' +
@@ -854,11 +874,18 @@
       '</div>' +
       '<p class="noprint aviso-print">Imprime, recorta y pon uno en cada mesa. Si el papel se ' +
       'moja o se ensucia, plastifícalo o métele un acetato: es lo único que va a tocar el cliente.</p>' +
+      '<div class="noprint aviso-print"><div class="med ' + (baseCorta(st) ? 'verde' : 'ambar') + '">' +
+        (baseCorta(st)
+          ? '<b>Impresión única</b>Estos códigos apuntan a tu nombre corto. Cambia precios cuando quieras: siguen sirviendo.'
+          : '<b>Antes de imprimir: estos códigos caducan</b>Traen la carta adentro, así que al cambiar un precio ' +
+            'dejan de servir y toca reimprimir las ' + Math.min(MAX_MESAS, Number(st.mesas)) + ' mesas. ' +
+            'Si la carta te va a cambiar seguido, pide primero tu nombre corto.') +
+      '</div></div>' +
       '<div class="hojas">' + paginas + '</div>');
 
     root.querySelectorAll('[data-qr]').forEach(function (caja) {
       var m = Number(caja.getAttribute('data-qr'));
-      var q = qrCanvas(linkPublico(st, m), 560);
+      var q = qrCanvas(linkQR(st, m), 560);
       if (!q) { caja.textContent = 'La carta es muy larga para un QR'; return; }
       var img = new Image();
       img.src = q.toDataURL('image/png');
@@ -895,7 +922,13 @@
       '</div>' +
 
       '<div class="card"><h3>2. Tu código QR</h3>' +
-        '<p class="cs">Imprímelo y pégalo en la mesa, en la vitrina o en la puerta. El cliente apunta la cámara y ve la carta.</p>' +
+        '<p class="cs">Imprímelo y pégalo en la vitrina o en la puerta. El cliente apunta la cámara y ve la carta.</p>' +
+        (baseCorta(st)
+          ? '<div class="med verde"><b>Este QR es para siempre</b>Apunta a <b>' + esc(baseCorta(st).replace(location.origin + '/', 'micarta.weissailab.com/')) + '</b>, ' +
+            'así que puedes cambiar precios las veces que quieras sin volver a imprimir nada.</div>'
+          : '<div class="med ambar"><b>Ojo: si cambias la carta, este QR deja de servir</b>' +
+            'La carta va dentro del link, así que al cambiar un precio cambia el link y el QR impreso queda viejo. ' +
+            'Con un nombre corto (más abajo) el QR queda fijo y no lo vuelves a imprimir nunca.</div>') +
         '<div id="qrbox"></div>' +
         '<div class="grid2">' +
           '<button class="btn ghost" data-act="bajar-qr">Descargar QR</button>' +
@@ -907,6 +940,12 @@
       (Number(st.mesas) ? '<div class="card"><h3>3. Un QR para cada mesa 🍽️</h3>' +
         '<p class="cs">Cada mesa lleva su propio código. Cuando el cliente pide, a ti te llega el ' +
         'pedido escrito y arriba, en grande, de qué mesa es. El mesero deja de anotar y pasa a confirmar.</p>' +
+        (baseCorta(st)
+          ? '<div class="med verde"><b>Se imprimen una sola vez</b>Los QR apuntan a tu nombre corto, ' +
+            'así que cambiar precios no los daña.</div>'
+          : '<div class="med ambar"><b>Sin nombre corto toca reimprimir todas las mesas</b>' +
+            'Cada vez que cambies un precio, estos ' + Math.min(MAX_MESAS, Number(st.mesas)) + ' códigos quedan viejos y hay que ' +
+            'imprimirlos y pegarlos otra vez. Si vas a poner QR en mesas, pide el nombre corto primero.</div>') +
         '<a class="btn wide" href="' + esc(linkMesas(st)) + '">Ver los ' + Math.min(MAX_MESAS, Number(st.mesas)) + ' avisos para imprimir</a>' +
         '<p class="hint" style="text-align:center;margin-top:8px">Salen 4 por hoja, listos para recortar.</p>' +
       '</div>' : '') +
@@ -947,8 +986,9 @@
       '<a class="btn ghost" href="' + esc(edi) + '">← Volver a editar mi carta</a>' +
       '</div>' + pie());
 
+    var destinoQR = linkQR(st);
     var box = document.getElementById('qrbox');
-    var q = qrCanvas(pub, 640);
+    var q = qrCanvas(destinoQR, 640);
     if (q) {
       var img = new Image();
       img.src = q.toDataURL('image/png');
@@ -994,8 +1034,8 @@
       if (a === 'copiar-pub') return copy(pub, 'Link copiado ✅');
       if (a === 'copiar-edi') return copy(edi, 'Link de edición copiado ✅');
       if (a === 'copiar-nequi') return copy(NEQUI, 'Número de Nequi copiado 🙏');
-      if (a === 'bajar-qr') { var c = qrCanvas(pub, 1200); if (c) bajar(c, 'QR-' + (st.n || 'carta').replace(/\W+/g, '-') + '.png'); return; }
-      if (a === 'bajar-aviso') return bajar(aviso(st, pub), 'Aviso-' + (st.n || 'carta').replace(/\W+/g, '-') + '.png');
+      if (a === 'bajar-qr') { var c = qrCanvas(destinoQR, 1200); if (c) bajar(c, 'QR-' + (st.n || 'carta').replace(/\W+/g, '-') + '.png'); return; }
+      if (a === 'bajar-aviso') return bajar(aviso(st, destinoQR), 'Aviso-' + (st.n || 'carta').replace(/\W+/g, '-') + '.png');
       if (a === 'guardar-wa') {
         var txt = '📌 GUARDA ESTE MENSAJE\n\nCarta de ' + (st.n || '') + '\n\n👉 Link para clientes:\n' + pub +
           '\n\n🔒 Link para editar (no lo compartas):\n' + edi;

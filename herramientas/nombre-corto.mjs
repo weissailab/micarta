@@ -8,6 +8,13 @@
  * puede crear quien tiene permiso de escritura en el repo, y por eso es el
  * gancho pago: cuando el dueño cambia precios, hay que volver a correr esto.
  *
+ * Para qué sirve de verdad: los QR impresos apuntan al nombre corto, no a la
+ * carta. Cuando el dueño cambia un precio solo se actualiza este archivo, y lo
+ * que está pegado en las mesas y en la vitrina sigue funcionando.
+ *
+ * Mesas: <nombre>/?m=4 lleva a la carta con la mesa 4 marcada. Un solo archivo
+ * atiende todas las mesas.
+ *
  * Después:  git add . && git commit -m "..." && git push
  */
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -44,6 +51,9 @@ if (!/^https:\/\/micarta\.weissailab\.com\/#\/c\/.+/.test(link)) {
   process.exit(1);
 }
 
+/* Si vino con mesa pegada la quitamos: la mesa la decide el ?m= de quien entra. */
+const destino = link.replace(/\/m\/\d+$/, '');
+
 const carpeta = join(RAIZ, nombre);
 const yaExistia = existsSync(carpeta);
 
@@ -56,17 +66,24 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cargando la carta…</title>
-<link rel="canonical" href="${link}">
+<link rel="canonical" href="${destino}">
 <meta name="robots" content="noindex">
 <style>
   body{margin:0;height:100vh;display:grid;place-items:center;background:#faf8f6;
        font:400 16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#6f6a60}
   a{color:#E23E2E;font-weight:700}
 </style>
-<script>location.replace(${JSON.stringify(link)});</script>
+<script>
+/* ?m=4 viene del QR de la mesa 4. Un solo archivo sirve a todas las mesas. */
+(function(){
+  var d = ${JSON.stringify(destino)};
+  var m = (location.search.match(/[?&]m=(\\d{1,3})(?:&|$)/) || [])[1];
+  location.replace(m ? d + '/m/' + m : d);
+})();
+</script>
 </head>
 <body>
-<p>Abriendo la carta… <noscript><a href="${link}">Toca aquí para verla</a></noscript></p>
+<p>Abriendo la carta… <noscript><a href="${destino}">Toca aquí para verla</a></noscript></p>
 </body>
 </html>
 `;
