@@ -8,6 +8,13 @@
   var SOPORTE_WA = '573171715071';
   var APP = document.getElementById('app');
 
+  /* Las fotos viajan dentro del link, así que cada byte se paga en el largo del
+     link. Presupuesto por foto y tope de fotos para que no se vuelva inmanejable. */
+  var MAX_FOTO = 3600;    // caracteres del dataURL de una foto
+  var MAX_FOTOS = 12;     // 12 x 3600 deja el link por debajo del tope
+  var TOPE_QR = 2850;     // pasado esto ya no cabe un QR
+  var TOPE_LINK = 45000;  // pasado esto el link se vuelve un problema real
+
   var THEMES = [
     { n: 'Brasa',   a: '#E23E2E', s: '#fdeceb' },
     { n: 'Selva',   a: '#1F8A5B', s: '#e8f5ef' },
@@ -86,6 +93,59 @@
   }
 
   function item() { return { n: '', d: '', p: 0, e: '', x: 0 }; }
+
+  /* ---------------- fotos ---------------- */
+
+  function pedirFoto(listo) {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.addEventListener('change', function () {
+      if (inp.files && inp.files[0]) listo(inp.files[0]);
+    });
+    inp.click();
+  }
+
+  /* Recorta al cuadrado desde el centro y comprime al tamaño pedido. */
+  function aCuadro(img, px, q) {
+    var lado = Math.min(img.width, img.height);
+    var c = document.createElement('canvas');
+    c.width = px; c.height = px;
+    c.getContext('2d').drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, px, px);
+    var d = c.toDataURL('image/webp', q);
+    /* Safari viejo no codifica webp y devuelve un PNG enorme sin avisar. */
+    if (d.slice(0, 15) !== 'data:image/webp') d = c.toDataURL('image/jpeg', q);
+    return d;
+  }
+
+  /* Baja calidad y tamaño hasta que la foto entre en el presupuesto. Una foto
+     de comida limpia se queda en 176px; una muy ruidosa cae hasta 112px. */
+  function comprimirFoto(file, listo, fallo) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var intentos = [[200, .5], [176, .5], [176, .4], [144, .45], [144, .35], [112, .45], [112, .3]];
+      var d = null;
+      for (var i = 0; i < intentos.length; i++) {
+        d = aCuadro(img, intentos[i][0], intentos[i][1]);
+        if (d.length <= MAX_FOTO) break;
+      }
+      listo(d);
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); fallo(); };
+    img.src = url;
+  }
+
+  function contarFotos(st) {
+    return st.g.reduce(function (a, g) {
+      return a + g.i.filter(function (i) { return i.f; }).length;
+    }, 0);
+  }
+
+  function pesoLink(st) {
+    return (location.origin + location.pathname + '#/c/').length + encode(st).length;
+  }
 
   function demo() {
     return {
@@ -252,6 +312,7 @@
     var root = mount(barra('<button class="btn sm" data-act="publicar">Publicar carta →</button>') +
       '<div class="wrap"><div class="ed">' +
         '<div class="main">' + panelNegocio() + panelCarta() +
+          '<div id="medidor"></div>' +
           '<button class="btn wide" data-act="publicar" style="padding:16px;font-size:16.5px">Publicar y ver mi QR →</button>' +
           '<p class="hint" style="text-align:center;margin-top:10px">Se guarda solo en tu celular mientras escribes.</p>' +
         '</div>' +
@@ -292,6 +353,27 @@
         var inp = APP.querySelector('[data-k="' + b.getAttribute('data-t') + '"]');
         if (inp) { inp.value = b.textContent; setPath(S, b.getAttribute('data-t'), b.textContent); guardar(S); renderPreview(); }
         return;
+      }
+      if (act === 'quitar-foto') {
+        ev.stopPropagation();
+        delete S.g[gi].i[ii].f;
+        guardar(S);
+        return vistaEditor();
+      }
+      if (act === 'foto') {
+        var actual = S.g[gi].i[ii];
+        if (!actual.f && contarFotos(S) >= MAX_FOTOS) {
+          return toast('Máximo ' + MAX_FOTOS + ' fotos: el link se vuelve muy pesado');
+        }
+        toast('Preparando la foto…');
+        return pedirFoto(function (file) {
+          comprimirFoto(file, function (dataUrl) {
+            S.g[gi].i[ii].f = dataUrl;
+            guardar(S);
+            vistaEditor();
+            toast('Foto lista (' + Math.round(dataUrl.length / 1024) + ' KB)');
+          }, function () { toast('No pude leer esa imagen, prueba con otra'); });
+        });
       }
       if (act === 'add-cat') { S.g.push({ n: '', i: [item()] }); guardar(S); return vistaEditor(); }
       if (act === 'del-cat') {
@@ -353,8 +435,12 @@
   function panelCarta() {
     var cats = S.g.map(function (g, gi) {
       var items = g.i.map(function (it, ii) {
-        return '<div class="item' + (it.x ? ' out' : '') + '">' +
-          '<input class="emo" data-k="g.' + gi + '.i.' + ii + '.e" maxlength="2" value="' + esc(it.e) + '" placeholder="🍽️" title="Ícono">' +
+        var izq = it.f
+          ? '<button class="emo foto" data-act="foto" data-g="' + gi + '" data-i="' + ii + '" title="Cambiar la foto">' +
+              '<img src="' + esc(it.f) + '" alt=""><span class="x" data-act="quitar-foto" data-g="' + gi + '" data-i="' + ii + '" title="Quitar la foto">✕</span></button>'
+          : '<input class="emo" data-k="g.' + gi + '.i.' + ii + '.e" maxlength="2" value="' + esc(it.e) + '" placeholder="🍽️" title="Ícono">';
+
+        return '<div class="item' + (it.x ? ' out' : '') + '">' + izq +
           '<div class="body">' +
             '<input class="inp" data-nombre="1" data-k="g.' + gi + '.i.' + ii + '.n" placeholder="Nombre del producto" value="' + esc(it.n) + '">' +
             '<div class="row">' +
@@ -364,6 +450,7 @@
             (it.x ? '<span class="tag">AGOTADO</span>' : '') +
           '</div>' +
           '<div class="tools">' +
+            '<button class="ic" data-act="foto" data-g="' + gi + '" data-i="' + ii + '" title="' + (it.f ? 'Cambiar la foto' : 'Ponerle foto') + '">📷</button>' +
             '<button class="ic" data-act="up-item" data-g="' + gi + '" data-i="' + ii + '" title="Subir">▲</button>' +
             '<button class="ic" data-act="down-item" data-g="' + gi + '" data-i="' + ii + '" title="Bajar">▼</button>' +
             '<button class="ic" data-act="out-item" data-g="' + gi + '" data-i="' + ii + '" title="Marcar agotado">' + (it.x ? '✅' : '🚫') + '</button>' +
@@ -393,6 +480,26 @@
   function renderPreview() {
     var p = document.getElementById('preview');
     if (p) p.innerHTML = cartaHTML(S, true);
+    var m = document.getElementById('medidor');
+    if (m) m.innerHTML = medidorHTML(S);
+  }
+
+  /* El link es el archivo: conviene que el dueño vea cuánto pesa y qué pierde. */
+  function medidorHTML(st) {
+    var largo = pesoLink(st);
+    var fotos = contarFotos(st);
+    if (largo > TOPE_LINK) {
+      return '<div class="med rojo"><b>El link quedó demasiado pesado</b>' +
+        'Con ' + fotos + ' fotos son ' + Math.round(largo / 1024) + ' KB y algunos celulares no lo abren. ' +
+        'Quítale fotos a los productos menos importantes.</div>';
+    }
+    if (largo > TOPE_QR) {
+      return '<div class="med ambar"><b>Con fotos no cabe el código QR</b>' +
+        'El link funciona perfecto para mandar por WhatsApp o Instagram (' + Math.round(largo / 1024) + ' KB), ' +
+        'pero para el QR de la mesa toca sin fotos. Quítalas y el QR vuelve solo.</div>';
+    }
+    return '<div class="med verde"><b>Cabe en un código QR</b>' +
+      'Van ' + largo + ' de ' + TOPE_QR + ' caracteres. Si le pones fotos, el QR ya no cabe pero el link sigue sirviendo.</div>';
   }
 
   function publicar() {
@@ -424,7 +531,9 @@
         body += '<div class="c-cat" id="cat' + gi + '">' + esc(g.n || 'Menú') + '</div>';
         g.i.forEach(function (it, ii) {
           body += '<div class="c-item' + (it.x ? ' out' : '') + '" data-add="' + gi + '.' + ii + '">' +
-            '<div class="e">' + esc(it.e || '🍽️') + '</div>' +
+            (it.f
+              ? '<div class="e foto" data-ver="' + gi + '.' + ii + '"><img src="' + esc(it.f) + '" alt="' + esc(it.n) + '" loading="lazy"></div>'
+              : '<div class="e">' + esc(it.e || '🍽️') + '</div>') +
             '<div class="d"><b>' + esc(it.n || 'Producto') + '</b>' +
               (it.d ? '<small>' + esc(it.d) + '</small>' : '') +
               (it.x ? '<small style="color:var(--acc);font-weight:700">Agotado por hoy</small>' : '') +
@@ -514,6 +623,8 @@
         if (!carrito[slot]) delete carrito[slot];
         return pintarSlots();
       }
+      var ver = ev.target.closest('[data-ver]');
+      if (ver) return hojaProducto(ver.getAttribute('data-ver'));
       var fila = ev.target.closest('[data-add]');
       if (fila && ev.target.closest('.add')) {
         var k = fila.getAttribute('data-add'), p = k.split('.');
@@ -523,6 +634,33 @@
       }
       if (ev.target.closest('[data-act="ver-pedido"]')) return hojaPedido();
     });
+
+    /* Tocar la foto abre el producto en grande: es media razón de ponerle foto. */
+    function hojaProducto(k) {
+      var p = k.split('.'), it = st.g[p[0]].i[p[1]];
+      var sh = document.createElement('div');
+      sh.className = 'sheet';
+      sh.innerHTML = '<div class="bd" data-cerrar="1"></div><div class="pn detalle">' +
+        '<img class="grande" src="' + esc(it.f) + '" alt="' + esc(it.n) + '">' +
+        '<h3>' + esc(it.n) + '</h3>' +
+        (it.d ? '<p class="cs">' + esc(it.d) + '</p>' : '') +
+        '<div class="line tot"><span>' + (Number(it.p) ? money(it.p) : 'Pregúntanos') + '</span></div>' +
+        (it.x
+          ? '<p class="hint" style="text-align:center">Agotado por hoy</p>'
+          : '<button class="btn wide" data-agregar="1" style="padding:15px;font-size:16px">Agregar al pedido</button>') +
+        '<button class="btn ghost wide sm" data-cerrar="1" style="margin-top:8px">Volver a la carta</button>' +
+      '</div>';
+      document.body.appendChild(sh);
+      sh.addEventListener('click', function (e) {
+        if (e.target.closest('[data-agregar]')) {
+          carrito[k] = (carrito[k] || 0) + 1;
+          pintarSlots();
+          sh.remove();
+          return toast('Agregado');
+        }
+        if (e.target.closest('[data-cerrar]')) sh.remove();
+      });
+    }
 
     function hojaPedido() {
       var lineas = Object.keys(carrito).map(function (k) {
@@ -697,6 +835,16 @@
         '</div>' +
       '</div>' +
 
+      '<div class="card"><h3>4. Ponle un nombre corto a tu link</h3>' +
+        '<p class="cs">En vez del link largo, tu carta queda en una dirección que la gente puede escribir de memoria ' +
+        'o dictar por teléfono. Sirve para la bio de Instagram y para el letrero del local.</p>' +
+        '<div class="corto"><span>micarta.weissailab.com/</span>' +
+          '<input class="inp" id="f-corto" placeholder="tunegocio" maxlength="24" autocapitalize="off" autocomplete="off" spellcheck="false"></div>' +
+        '<p class="hint" id="corto-aviso">Letras sin tildes, números y guiones. Entre 2 y 24 caracteres.</p>' +
+        '<button class="btn wide" data-act="pedir-corto">Pedir mi nombre corto</button>' +
+        '<p class="hint" style="text-align:center;margin-top:8px">Lo dejo listo yo y te confirmo por WhatsApp.</p>' +
+      '</div>' +
+
       '<div class="card nequi"><h3>¿Te sirvió? 🙏</h3>' +
         '<p class="cs">MiCarta es gratis y sin publicidad. Si te ahorró una tarde y unos pesos de impresión, mándame lo que consideres a Nequi. Con eso sigue siendo gratis para el que viene detrás.</p>' +
         '<div class="num">Nequi ' + NEQUI + '</div>' +
@@ -731,13 +879,33 @@
         box.parentNode.insertBefore(av, box.nextSibling);
       }
     } else {
-      box.innerHTML = '<p class="hint">Tu carta quedó muy larga para caber en un código QR. Quítale algunos productos o descripciones y vuelve a publicar; el link sí funciona igual.</p>';
+      box.innerHTML = '<div class="med ambar" style="text-align:left"><b>Esta carta no cabe en un código QR</b>' +
+        (contarFotos(st)
+          ? 'Las fotos ocupan casi todo el espacio del link. Si necesitas el QR para pegar en la mesa, quítales la foto a los productos y vuelve a publicar.'
+          : 'Quítale algunos productos o acorta las descripciones y vuelve a publicar.') +
+        ' El link de arriba funciona igual de bien para WhatsApp e Instagram.</div>';
     }
 
     root.addEventListener('click', function (ev) {
       var b = ev.target.closest('[data-act]');
       if (!b) return;
       var a = b.getAttribute('data-act');
+      if (a === 'pedir-corto') {
+        var campo = document.getElementById('f-corto');
+        var n = String(campo.value || '').trim().toLowerCase().replace(/\s+/g, '');
+        var aviso = document.getElementById('corto-aviso');
+        if (!/^[a-z0-9][a-z0-9-]{1,23}$/.test(n)) {
+          campo.focus();
+          aviso.style.color = 'var(--acc)';
+          aviso.textContent = 'Ese nombre no sirve: entre 2 y 24 caracteres, letras sin tildes, números y guiones.';
+          return;
+        }
+        campo.value = n;
+        window.open('https://wa.me/' + SOPORTE_WA + '?text=' + encodeURIComponent(
+          'Hola, quiero el nombre corto *micarta.weissailab.com/' + n + '* para la carta de ' +
+          (st.n || 'mi negocio') + '.\n\nEste es mi link:\n' + pub), '_blank');
+        return;
+      }
       if (a === 'copiar-pub') return copy(pub, 'Link copiado ✅');
       if (a === 'copiar-edi') return copy(edi, 'Link de edición copiado ✅');
       if (a === 'copiar-nequi') return copy(NEQUI, 'Número de Nequi copiado 🙏');

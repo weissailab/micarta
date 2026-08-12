@@ -35,7 +35,9 @@ un borrador en `localStorage` mientras se escribe.
 |---|---|
 | `index.html` | Cascarón, metadatos y favicon en línea |
 | `app.css` | Estilos, 8 temas de color, layout de celular |
-| `app.js` | Ruteo por hash, editor, vista pública, carrito, QR y aviso imprimible |
+| `app.js` | Ruteo por hash, editor, vista pública, carrito, fotos, QR y aviso imprimible |
+| `herramientas/nombre-corto.mjs` | Crea `micarta.weissailab.com/<nombre>` (una redirección estática) |
+| `<nombre>/index.html` | Cada nombre corto entregado a un cliente |
 | `vendor/lz-string.min.js` | Compresión del estado al link (MIT) |
 | `vendor/qrcode.js` | Generador de QR de Kazuhiko Arase (MIT) |
 
@@ -47,7 +49,14 @@ Sin build, sin dependencias en tiempo de ejecución, sin CDN: se sirve como arch
   funcionando pero el QR ya no se genera, y la app lo dice en pantalla.
 - Arriba de ~110 módulos el QR queda denso y hay que acercarle el celular; la app avisa
   y recomienda imprimirlo grande.
-- No hay fotos de productos: solo íconos. Meter imágenes en el link lo haría gigante.
+- **Fotos y QR no conviven.** Una foto comprimida al mínimo (200px WebP) pesa ~3 KB dentro
+  del link, y en un QR solo caben ~2,9 KB en total. Con una sola foto el QR ya no se genera.
+  La app lo dice en pantalla con un medidor de peso, en vez de fallar en silencio: máximo 12
+  fotos y aviso en ámbar apenas se pierde el QR. El uso con QR (mesa de restaurante) y el uso
+  con fotos (catálogo por WhatsApp e Instagram) son escenarios distintos, y cada dueño escoge.
+- **Los nombres cortos no son autoservicio.** Sin servidor no hay redirecciones dinámicas: cada
+  nombre es un archivo en el repo. Se crean con `herramientas/nombre-corto.mjs` y hay que
+  volver a correrlo cuando el dueño cambia su carta. Por eso es un servicio pago y no un botón.
 
 ## Verificado
 

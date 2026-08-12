@@ -100,7 +100,20 @@ textarea.inp{resize:vertical; min-height:64px}
 .item .tools{display:flex; flex-direction:column; gap:4px}
 .ic{width:30px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--mut); background:var(--bg)}
 .ic:hover{background:var(--acc-soft); color:var(--acc)}
+.item .emo.foto{position:relative; padding:0; overflow:visible}
+.item .emo.foto img{width:100%; height:100%; object-fit:cover; border-radius:9px; display:block}
+.item .emo.foto .x{
+  position:absolute; top:-7px; right:-7px; width:19px; height:19px; border-radius:50%;
+  background:var(--ink); color:#fff; font-size:11px; line-height:19px; text-align:center; font-weight:700;
+}
 .item.out .body{opacity:.5}
+
+/* medidor de peso del link */
+.med{border-radius:14px; padding:14px 16px; margin-bottom:16px; font-size:13.5px; line-height:1.45}
+.med b{display:block; font-size:14.5px; margin-bottom:3px}
+.med.verde{background:#e8f5ef; color:#14603f}
+.med.ambar{background:#fdf3e5; color:#8a5107}
+.med.rojo{background:#fdeceb; color:#a8231a}
 .tag{font-size:11.5px; font-weight:800; padding:2px 7px; border-radius:6px; background:var(--acc-soft); color:var(--acc)}
 
 /* ---------- phone preview ---------- */
@@ -127,6 +140,16 @@ textarea.inp{resize:vertical; min-height:64px}
 .c-cat:first-child{margin-top:4px}
 .c-item{display:flex; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid var(--line)}
 .c-item .e{width:46px; height:46px; flex:0 0 46px; border-radius:12px; background:var(--acc-soft); display:flex; align-items:center; justify-content:center; font-size:25px}
+.c-item .e.foto{padding:0; overflow:hidden}
+.c-item .e.foto img{width:100%; height:100%; object-fit:cover; display:block}
+.sheet .pn.detalle{text-align:center}
+.sheet .pn.detalle .grande{
+  /* no pasamos de 240: la foto viene comprimida a 200px y ampliarla más se ve blanda */
+  width:100%; max-width:240px; aspect-ratio:1; object-fit:cover;
+  border-radius:16px; margin:0 auto 14px; display:block;
+}
+.sheet .pn.detalle .cs{color:var(--mut); font-size:14.5px; margin-bottom:6px}
+.sheet .pn.detalle .line.tot{justify-content:center; border:0; margin:0 0 14px; padding-top:0}
 .c-item .d{flex:1; min-width:0}
 .c-item .d b{display:block; font-size:15.5px; font-weight:700}
 .c-item .d small{color:var(--mut); font-size:13px; display:block; margin-top:1px}
@@ -170,6 +193,11 @@ textarea.inp{resize:vertical; min-height:64px}
 #qrbox img,#qrbox canvas{width:210px; height:210px; image-rendering:pixelated; border-radius:12px}
 .nequi{background:linear-gradient(135deg,#fff5f4,#fdf3ff); border:1.5px solid #f3d7e6}
 .nequi .num{font-size:24px; font-weight:800; letter-spacing:.02em; margin:6px 0 12px}
+.corto{display:flex; align-items:center; gap:0; background:var(--bg); border:1.5px solid var(--line); border-radius:12px; padding:0 4px 0 12px; overflow:hidden}
+.corto span{font-size:13.5px; color:var(--mut); white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.corto .inp{border:0; background:none; padding:12px 6px; font-weight:700; min-width:0}
+.corto .inp:focus{box-shadow:none}
+@media(max-width:430px){ .corto{flex-direction:column; align-items:stretch; padding:8px 10px} .corto span{padding-bottom:2px} .corto .inp{padding:4px 0} }
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
 @media(max-width:460px){ .grid2{grid-template-columns:1fr} }
 /* ---------- celulares angostos ---------- */
