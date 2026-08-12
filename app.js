@@ -322,6 +322,9 @@
   }
 
   function router() {
+    // Se relee en cada navegacion, no solo al arrancar: si el dueno entro en
+    // otra pestana, esta se entera sin tener que recargar.
+    cuentaCargar();
     var h = location.hash || '';
 
     // Direccion fija: /tunegocio (con ?m=4 si viene del QR de una mesa).
