@@ -7,6 +7,26 @@
   var NEQUI = '3171715071';
   var SOPORTE_WA = '573171715071';
   var API = 'https://panel.weissailab.com';
+
+  /* LA RAIZ DE LA APLICACION, QUE NO SIEMPRE ES LA RUTA ACTUAL.
+
+     Con direccion fija, 404.html carga esta misma app desde
+     micarta.weissailab.com/lasespiga, asi que location.pathname trae el nombre
+     del negocio. Usandolo tal cual, el enlace "MiCarta" del pie de la carta
+     llevaba de vuelta a la carta del mismo negocio en vez de a MiCarta — y ese
+     es el unico enlace por el que el producto se propaga. Igual pasaba con el
+     "volver" del login: entrabas con Google y aterrizabas en la carta ajena en
+     lugar del editor.
+
+     Arranca con la ruta actual (que es la correcta en todas las demas
+     pantallas) y el ruteador le quita el nombre corto cuando detecta uno. */
+  var RAIZ = location.origin + location.pathname;
+
+  function fijarRaiz(slug) {
+    /* El slug ya viene validado contra [a-z0-9-] por el ruteador: no puede
+       traer metacaracteres de expresion regular, asi que no hay que escapar. */
+    RAIZ = location.origin + location.pathname.replace(new RegExp('/' + slug + '/?$'), '/');
+  }
   var APP = document.getElementById('app');
 
   /* ---------------- cuenta (modo 2: con Google) ----------------
@@ -71,7 +91,7 @@
   }
 
   function urlEntrar(volver) {
-    return API + '/micarta/entrar?volver=' + encodeURIComponent(location.origin + location.pathname + (volver || '#/publicado'));
+    return API + '/micarta/entrar?volver=' + encodeURIComponent(RAIZ + (volver || '#/publicado'));
   }
 
   /* El token llega en el fragmento, que no viaja al servidor. Se guarda y se
@@ -285,7 +305,7 @@
   }
 
   function pesoLink(st) {
-    return (location.origin + location.pathname + '#/c/').length + encode(st).length;
+    return (RAIZ + '#/c/').length + encode(st).length;
   }
 
   function demo() {
@@ -330,11 +350,11 @@
   /* El número de mesa va pegado al final del link: la carta es la misma para
      todas las mesas, solo cambia el sufijo, así que el QR casi no crece. */
   function linkPublico(state, mesa) {
-    return location.origin + location.pathname + '#/c/' + encode(state) +
+    return RAIZ + '#/c/' + encode(state) +
       (mesa ? '/m/' + mesa : '');
   }
   function linkMesas(state) {
-    return location.origin + location.pathname + '#/mesas/' + encode(state);
+    return RAIZ + '#/mesas/' + encode(state);
   }
 
   /* Con nombre corto el QR apunta a una direccion fija y no a la carta, asi que
@@ -352,7 +372,7 @@
     return linkPublico(state, mesa);
   }
   function linkEdicion(state) {
-    return location.origin + location.pathname + '#/e/' + encode(state);
+    return RAIZ + '#/e/' + encode(state);
   }
 
   function tema(state) { return THEMES[Number(state.c) || 0] || THEMES[0]; }
@@ -398,6 +418,7 @@
     var ruta = location.pathname.replace(/^\/+|\/+$/g, '');
     if (ruta && /^[a-z0-9][a-z0-9-]{1,23}$/.test(ruta) && !h) {
       var mesa = Number((location.search.match(/[?&]m=(\d{1,3})/) || [])[1]) || 0;
+      fijarRaiz(ruta);
       return vistaPorNombre(ruta, mesa);
     }
 
@@ -793,7 +814,7 @@
       '</div>' + tabs +
       '<div class="c-body">' + body + '</div>' +
       '<div class="c-bar" id="cbar"></div>' +
-      '<div class="c-foot">Carta hecha con <a href="' + (preview ? '#' : location.origin + location.pathname) + '" target="_blank" rel="noopener">MiCarta</a> · gratis para tu negocio</div>' +
+      '<div class="c-foot">Carta hecha con <a href="' + (preview ? '#' : RAIZ) + '" target="_blank" rel="noopener">MiCarta</a> · gratis para tu negocio</div>' +
     '</div>';
   }
 
