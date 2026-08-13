@@ -442,8 +442,14 @@
   }
 
   function barra(extra) {
+    /* MiCarta es la herramienta gratis; el laboratorio es lo que hay detras.
+       El enlace va discreto y solo en la aplicacion, nunca dentro de la carta
+       del cliente: el negocio no reparte publicidad nuestra a sus comensales. */
     return '<div class="top"><div class="wrap">' +
-      '<a class="brand" href="#"><i>🧾</i>MiCarta</a><div class="sp"></div>' +
+      '<a class="brand" href="#"><i>🧾</i>MiCarta</a>' +
+      '<a class="lab" href="https://weissailab.com/?desde=micarta" target="_blank" rel="noopener">' +
+        'por Weiss AI Lab ↗</a>' +
+      '<div class="sp"></div>' +
       (extra || '') + '</div></div>';
   }
 
@@ -1437,6 +1443,7 @@
         ' productos' + (c.mesas ? ' · ' + c.mesas + ' mesas' : '') + '</p>' +
         '<div class="grid2">' +
           '<button class="btn" data-editar="' + esc(c.carta_id) + '">Editar precios</button>' +
+          '<button class="btn ghost" data-borrar="' + esc(c.carta_id) + '" title="Dar de baja">🗑</button>' +
           (c.nombre_corto
             ? '<a class="btn ghost" href="/' + esc(c.nombre_corto) + '" target="_blank" rel="noopener">Ver mi carta</a>'
             : '') +
@@ -1456,6 +1463,27 @@
         location.hash = '#/';
         return;
       }
+      var borrar = ev.target.closest('[data-borrar]');
+      if (borrar) {
+        var id = borrar.getAttribute('data-borrar');
+        var esta = cartas.filter(function (x) { return x.carta_id === id; })[0] || {};
+        var texto = '¿Dar de baja "' + (esta.negocio || 'esta carta') + '"?\n\n' +
+          (esta.nombre_corto
+            ? 'Su dirección micarta.weissailab.com/' + esta.nombre_corto + ' queda reservada para ' +
+              'siempre y nadie más podrá usarla, para que ningún QR impreso termine en otro negocio. ' +
+              'Los códigos que ya estén pegados dejarán de mostrar la carta.'
+            : 'Deja de aparecer en tu lista.');
+        if (!confirm(texto)) return;
+
+        borrar.disabled = true;
+        return api('/api/micarta/carta', { metodo: 'DELETE', cuerpo: { carta_id: id } }).then(function (r) {
+          if (r.estado !== 200) { borrar.disabled = false; return toast('No se pudo dar de baja'); }
+          if (edicion && edicion.cartaId === id) { empezarDeCero(); }
+          toast('Carta dada de baja');
+          vistaMisCartas();
+        });
+      }
+
       var b = ev.target.closest('[data-editar]');
       if (!b) return;
       var c = cartas.filter(function (x) { return x.carta_id === b.getAttribute('data-editar'); })[0];
